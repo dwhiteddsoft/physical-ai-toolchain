@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: MIT
+# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+#
+# Privileged node agent DaemonSet. It stages the offloading client library onto each
+# node's host filesystem under `libPath` (mounted from `/opt`) so mutated workloads
+# can load it via a hostPath mount, then idles.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "gpu-offload.fullname" . }}-node-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "gpu-offload.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: node-agent
+  template:
+    metadata:
+      labels:
+        {{- include "gpu-offload.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node-agent
+    spec:
+      terminationGracePeriodSeconds: 0
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: node-agent
+          image: {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.nodeAgent.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The staging image is minimal (no bash): stage the library, then idle.
+          command: ["/bin/sh", "-c"]
+          args: ["/pyremote/pyremotecp.sh && sleep infinity"]
+          securityContext:
+            privileged: true
+          env:
+            - name: XAVIER_LIB_PATH
+              value: {{ .Values.libPath | quote }}
+            - name: SERVERPORT
+              value: {{ .Values.serverPort | quote }}
+            - name: REMOTERPORT
+              value: {{ .Values.remoterPort | quote }}
+          volumeMounts:
+            - name: opt
+              mountPath: /opt
+      volumes:
+        - name: opt
+          hostPath:
+            path: /opt
+            type: Directory

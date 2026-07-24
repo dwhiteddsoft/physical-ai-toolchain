@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT
+# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+
+# -- Container registry that hosts the prebuilt offloading images. This chart does
+# NOT build these images; they are consumed as prebuilt external artifacts. Set to
+# the registry you have mirrored the images into (placeholder shown below).
+image:
+  registry: <your-registry>.azurecr.io
+  # Applied to every container in this chart.
+  pullPolicy: IfNotPresent
+
+# -- References to registry pull secrets. Leave empty and prefer workload identity
+# (AKS: federated credentials on a managed identity + AcrPull role assignment) so no
+# registry credential is stored in the cluster. To use a secret instead, create it
+# out of band and list its name here. NEVER inline registry credentials in values.
+#
+# imagePullSecrets:
+#   - name: acr-pull-secret
+imagePullSecrets: []
+
+# -- Mutating admission webhook that rewrites opt-in workloads for GPU offloading.
+mutate:
+  image:
+    # -- Real image name consumed from `image.registry`.
+    repository: xavier-mutate
+    # -- Leave `tag` empty and set `digest` to a sha256 pin for reproducible,
+    # tamper-evident deploys (recommended). When `digest` is set it wins over `tag`.
+    # Example: digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    tag: ""
+    digest: ""
+  # -- TLS port the webhook Service and admission endpoint listen on.
+  webhookPort: 6443
+  # -- Log verbosity for the mutate controller (error | warning | info | debug).
+  logLevel: warning
+  # -- cert-manager supplies the webhook serving certificate and injects the CA
+  # bundle. Disable only if you provision the webhook TLS material another way.
+  certManager:
+    enabled: true
+    # Certificate validity window.
+    duration: 4320h
+
+# -- Privileged node agent DaemonSet that stages the offloading client library onto
+# each node under `libPath` so mutated workloads can load it via a hostPath mount.
+nodeAgent:
+  image:
+    # -- Real image name consumed from `image.registry`.
+    repository: pyremote
+    # -- Leave `tag` empty and set `digest` to a sha256 pin (recommended). When
+    # `digest` is set it wins over `tag`.
+    tag: ""
+    digest: ""
+
+# -- Host path where the node agent stages the offloading client library and where
+# mutated workloads expect to find it (mounted from the node's `/opt`).
+libPath: /opt/xavier/lib
+
+# -- Offloading runtime ports. `serverPort` is the GPU-stage server; `remoterPort`
+# is the client remoter endpoint (exported to the node agent as `REMOTERPORT`).
+serverPort: 30000
+remoterPort: 30001

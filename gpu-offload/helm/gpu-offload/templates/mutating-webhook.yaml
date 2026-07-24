@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+#
+# MutatingWebhookConfiguration wiring the webhook Service at path /mutate. Only
+# workloads carrying the opt-in `xavier` label are selected, so the webhook is inert
+# for every other workload in the cluster.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "gpu-offload.fullname" . }}-mutate
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+  {{- if .Values.mutate.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "gpu-offload.fullname" . }}-mutate-cert
+  {{- end }}
+webhooks:
+  - name: mutate.gpu-offload.io
+    clientConfig:
+      service:
+        name: {{ include "gpu-offload.fullname" . }}-mutate
+        path: /mutate
+        port: {{ .Values.mutate.webhookPort }}
+        namespace: {{ .Release.Namespace }}
+    objectSelector:
+      matchExpressions:
+        - key: xavier
+          operator: In
+          values: ["true", "True", "TRUE", "1"]
+    sideEffects: None
+    admissionReviewVersions: ["v1"]
+    failurePolicy: Fail
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["deployments", "statefulsets"]
+        scope: Namespaced
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["jobs"]
+        scope: Namespaced

@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+apiVersion: v2
+name: gpu-offload
+description: Transparent GPU-offloading platform components (mutating webhook + node agent) for opt-in workloads.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - gpu
+  - offloading
+  - admission-webhook
+  - daemonset

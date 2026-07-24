@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 
 """Utility functions for SO-101 robot control with LeRobot.
 

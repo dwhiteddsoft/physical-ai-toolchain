@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 #!/usr/bin/env python3
 
 # Copyright 2026 The HuggingFace Inc. team. All rights reserved.

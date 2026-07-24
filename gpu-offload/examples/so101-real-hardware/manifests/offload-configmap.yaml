@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 #
 # ConfigMap that carries the offload spec (remote.yaml) for the SO101 VLA control loop.
 # The control workload references this ConfigMap by name through its `xavierconfig`

@@ -112,11 +112,3 @@ cross-machine offload of control-loop functions requires explicit review.
 | `templates/mutate-deployment.yaml`    | Deployment, Service, RBAC, cert-manager | Runs the mutate controller and its serving certificate.          |
 | `templates/mutating-webhook.yaml`     | MutatingWebhookConfiguration            | Registers the `/mutate` webhook, selected on the `xavier` label. |
 | `templates/node-agent-daemonset.yaml` | DaemonSet                               | Stages the client library to each node's `libPath`.              |
-
----
-
-This reference architecture originates with the Microsoft Research Xavier team, whose
-`xavier-tutorial` project defined the transparent GPU-offloading contract and
-deployment topology adapted here. This repository carries the consumer-facing contract
-and deployment scaffolding only; the offloading engine ships as prebuilt external
-images.

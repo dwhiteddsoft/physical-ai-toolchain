@@ -24,12 +24,13 @@ a separate `hardware_bridge` node owns the motor bus. See
 | Physical SO-101            | A calibrated SO-101 follower arm connected to the bridge host                                                                               |
 | `hardware_bridge` node     | Running against the physical arm, publishing state and subscribing to commands over ROS2 topics                                             |
 | ROS2 environment           | A ROS2 install with `rclpy`, `sensor_msgs`, `std_msgs`, and `cv_bridge`, plus your camera driver topics                                     |
-| Control image              | An operator-built image containing `run_vla.py`, the vendored [ros2_bridge](./ros2_bridge/), and the LeRobot runtime                        |
+| Control image              | An operator-built image containing `run_vla.py`, the bundled [ros2_bridge](./ros2_bridge/), and the LeRobot runtime                         |
 | Trained checkpoint         | A SmolVLA checkpoint reachable by the control container (`MODEL_ID`)                                                                        |
 
 > [!IMPORTANT]
-> This example is authored and lint-validated, not runtime-verified. The offloading
-> platform images and a physical arm are external prerequisites you supply.
+> This example is a reference to adapt to your setup; it has not been validated
+> end-to-end. The offloading platform images and a physical arm are prerequisites you
+> supply.
 
 ## 🚀 Run
 
@@ -86,8 +87,8 @@ a separate `hardware_bridge` node owns the motor bus. See
 
 ## ⚠️ Limitations
 
-- This example is **authored and lint-validated, NOT runtime-verified.** No end-to-end run
-  exists; treat every command as a reference to adapt, not a validated recipe.
+- This example has **not been validated end-to-end.** Treat every command as a reference
+  to adapt to your hardware, not a turnkey recipe.
 - The offloading platform images (`xavier-mutate`, `pyremote`) are an external
   prerequisite. The chart and this example consume them; they are not built here.
 - Offloading `select_action` across machines injects network latency and jitter into the
@@ -106,11 +107,3 @@ a separate `hardware_bridge` node owns the motor bus. See
 - [gpu-offload chart README](../../helm/README.md) — installing the platform components.
 - [Bring your own arm](./bring-your-own-arm.md) — adapting the bridge to another arm.
 - [ROS2 bridge guide](./ROS2_README.md) — the ROS2 robot/bridge details.
-
----
-
-> This reference architecture originates with the Microsoft Research Xavier team, whose
-> `xavier-tutorial` project defined the transparent GPU-offloading contract and
-> deployment topology adapted here. This repository carries the consumer-facing contract
-> and deployment scaffolding only; the offloading engine ships as prebuilt external
-> images.

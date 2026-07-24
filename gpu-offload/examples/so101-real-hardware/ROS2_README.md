@@ -3,12 +3,11 @@
 This directory contains ROS2-based implementations of LeRobot robots that communicate via ROS2 topics/actions instead of direct hardware bus connections.
 
 > [!IMPORTANT]
-> This example is **authored and lint-validated, NOT runtime-verified.** We have neither
-> the prebuilt GPU-offload platform images nor a physical SO-101 arm, so no end-to-end run,
-> screenshots, or captures exist. Treat every command below as a reference to adapt, not a
-> validated recipe. The real-hardware control loop lives in
-> `ros2_bridge/examples/so101_ros/run_vla.py`; it is topic-source-agnostic and drives the
-> arm entirely through the `hardware_bridge` node — no simulator is involved.
+> This example has **not been validated end-to-end** — treat every command below as a
+> reference to adapt, not a turnkey recipe. It requires the prebuilt GPU-offload platform
+> images and a physical SO-101 arm, which you supply. The real-hardware control loop lives
+> in `ros2_bridge/examples/so101_ros/run_vla.py`; it is topic-source-agnostic and drives
+> the arm entirely through the `hardware_bridge` node — no simulator is involved.
 
 <!-- -->
 
@@ -354,11 +353,3 @@ See `examples/` directory for complete examples:
 ## License
 
 Apache 2.0 - See LICENSE file for details
-
-## Attribution
-
-> This reference architecture originates with the Microsoft Research Xavier team, whose
-> `xavier-tutorial` project defined the transparent GPU-offloading contract and
-> deployment topology adapted here. This repository carries the consumer-facing contract
-> and deployment scaffolding only; the offloading engine ships as prebuilt external
-> images.

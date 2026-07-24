@@ -109,11 +109,3 @@ cluster fabric.
 See [remote-spec-schema.md](./remote-spec-schema.md) for the `remote.yaml` schema:
 `serverstages`, `remoteclasses`, and `remotefuncs`, including the `singleinstance`
 flag.
-
----
-
-> This reference architecture originates with the Microsoft Research Xavier team, whose
-> `xavier-tutorial` project defined the transparent GPU-offloading contract and
-> deployment topology adapted here. This repository carries the consumer-facing contract
-> and deployment scaffolding only; the offloading engine ships as prebuilt external
-> images.

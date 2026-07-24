@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 #
 # Mutating webhook controller: serving certificate (optional, via cert-manager),
 # RBAC, Service, and Deployment. The controller rewrites opt-in workloads so their

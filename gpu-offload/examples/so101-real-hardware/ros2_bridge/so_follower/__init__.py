@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 
 # Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
@@ -15,11 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NOTE (vendored, partial): This __init__ reproduces ONLY the ROS2 export block that
-# the upstream xavier-tutorial patch added to lerobot's so_follower package __init__.
-# The original upstream exports (SO100Follower, SO101Follower, and their configs) are
-# NOT reproduced here because they belong to unmodified upstream LeRobot. See
-# CARRY-DECISION.md for the full provenance and reconstruction notes.
+# This __init__ exposes only the ROS2 variants of the SO-follower config and robot.
+# The base LeRobot exports (SO100Follower, SO101Follower, and their configs) are provided
+# by the upstream lerobot package and are intentionally not re-exported here.
 
 from __future__ import annotations
 

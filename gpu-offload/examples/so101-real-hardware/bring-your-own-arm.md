@@ -156,15 +156,6 @@ for the opt-in offload contract that the policy call participates in.
 
 ## Validation status
 
-The examples in this directory are authored and lint-validated. They are not
-runtime-verified by this repository: it carries neither the prebuilt offloading images
-nor a physical arm. Treat every command and code snippet as a reference to adapt and
-verify on your own hardware.
-
----
-
-> This reference architecture originates with the Microsoft Research Xavier team, whose
-> `xavier-tutorial` project defined the transparent GPU-offloading contract and
-> deployment topology adapted here. This repository carries the consumer-facing contract
-> and deployment scaffolding only; the offloading engine ships as prebuilt external
-> images.
+The examples in this directory have not been validated end-to-end; they require the
+prebuilt offloading images and a physical arm, which you supply. Treat every command and
+code snippet as a reference to adapt and verify on your own hardware.

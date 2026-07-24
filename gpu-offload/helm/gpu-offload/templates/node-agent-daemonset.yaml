@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 #
 # Privileged node agent DaemonSet. It stages the offloading client library onto each
 # node's host filesystem under `libPath` (mounted from `/opt`) so mutated workloads

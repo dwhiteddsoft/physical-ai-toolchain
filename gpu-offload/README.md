@@ -20,8 +20,7 @@ pod.
 - A Kubernetes cluster with GPU nodes and the NVIDIA device plugin available.
 - The offloading engine images (`xavier-mutate` and `pyremote`), published to a
   registry your cluster can pull from. This domain does **not** build these images;
-  supply them and set the registry through the Helm value `image.registry` (see
-  [OPEN-ITEMS.md](./OPEN-ITEMS.md) for the digest-pinning and registry-access follow-ups).
+  supply them and set the registry through the Helm value `image.registry`.
 - Helm 3 and `kubectl` configured against the target cluster.
 - A robot control workload that can be annotated to opt into offloading (the bundled
   example targets an SO-101 arm over ROS 2).
@@ -53,19 +52,19 @@ gpu-offload/
 │   ├── README.md
 │   └── gpu-offload/           # Chart: webhook, mutation, node-agent DaemonSet
 └── examples/
-    └── so101-real-hardware/   # SO-101 offload example (not runtime-verified)
+    └── so101-real-hardware/   # SO-101 offload example
         ├── remote.yaml
         ├── manifests/         # ConfigMap + control workload
-        └── ros2_bridge/       # Vendored LeRobot ROS 2 bridge (lint-only reference)
+        └── ros2_bridge/       # LeRobot ROS 2 bridge for the example
 ```
 
 ## ⚠️ Scope & limitations
 
-- No Isaac Sim / LeIsaac content.
-- No `ml_proxy`, `watcher`, XApp CRD, or MCP server.
+- This domain provides the offloading **contract, deployment scaffolding, and a reference
+  example** — not the offloading engine.
 - The offloading engine images are an external prerequisite; this domain does not build
   them.
-- The real-hardware example is authored and lint-validated, **not** runtime-verified.
+- The real-hardware example has not been validated end-to-end; adapt it to your hardware.
 
 ## 🧩 Tier mapping
 

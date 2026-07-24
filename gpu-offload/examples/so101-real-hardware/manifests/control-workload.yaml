@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 #
 # Control-loop workload for the real-hardware SO101 VLA example. This runs the
 # lightweight, non-GPU control container next to the robot; the policy action-selection

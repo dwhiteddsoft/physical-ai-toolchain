@@ -117,27 +117,8 @@ remotefuncs:
 > label, annotation, and ConfigMap wiring — is specified in
 > [gpu-offload.specification.md](./gpu-offload.specification.md).
 
-## Field provenance
+## Scheduling
 
-This schema records the confidence level of each field so future maintainers can tell
-observed structure from inferred behavior.
-
-| Field                                 | Source                                                                                     |
-|---------------------------------------|--------------------------------------------------------------------------------------------|
-| `serverstages[].name`                 | Directly observed in the rendered `remote.yaml` body.                                      |
-| `serverstages[].perclient`            | Directly observed (`perclient: false`); shared-vs-dedicated meaning inferred.              |
-| `serverstages[].resources`            | Directly observed (`limits.nvidia.com/gpu: 1`).                                            |
-| `remoteclasses[].<path>.remoteloc`    | Directly observed; class-path form (`module.path/ClassName`) observed from examples.       |
-| `remotefuncs[].<path>.remoteloc`      | Directly observed; func-path form (`module.path/ClassName/method`) observed from examples. |
-| `remotefuncs[].<path>.singleinstance` | Directly observed (rendered only when set); shared-load semantics inferred from usage.     |
-
-No scheduling hints beyond `resources` appear in the observed `remote.yaml` body; pod
-placement (node selectors, runtime class) is configured on the workload rather than in the
-offload spec.
-
----
-
-This reference architecture originates with the Microsoft Research Xavier team, whose
-`xavier-tutorial` project defined the transparent GPU-offloading contract and deployment
-topology adapted here. This repository carries the consumer-facing contract and deployment
-scaffolding only; the offloading engine ships as prebuilt external images.
+No scheduling hints beyond `resources` appear in the `remote.yaml` body; pod placement
+(node selectors, runtime class) is configured on the workload rather than in the offload
+spec.

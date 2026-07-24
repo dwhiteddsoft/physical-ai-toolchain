@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Adapted from Microsoft Research "xavier-tutorial" (GPU-offloading reference architecture).
+# Adapted from an upstream GPU-offloading reference implementation.
 
 """Run a SmolVLA policy for real SO-101 hardware control via ROS2.
 
@@ -73,10 +73,8 @@ from utils import (
 )
 
 # Default values
-# NOTE (sanitized): the upstream default checkpoint path embedded a run GUID that the
-# integration denylist prohibits. The GUID has been replaced with a "<run-id>" placeholder.
-# Provide the real checkpoint via the MODEL_ID environment variable or --model-id.
-# See CARRY-DECISION.md.
+# The default checkpoint path uses a "<run-id>" placeholder. Provide the real checkpoint
+# via the MODEL_ID environment variable or --model-id.
 DEFAULT_MODEL_ID = os.environ.get(
     "MODEL_ID",
     "/data/smolvla_lift_cube_abs_joint/<run-id>/checkpoints/010000/pretrained_model"

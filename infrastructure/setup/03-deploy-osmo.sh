@@ -59,6 +59,8 @@ OPTIONS:
     --skip-backend          Skip backend operator deployment
     --use-incluster-redis   Use in-cluster Redis instead of Azure Managed Redis
                             (unauthenticated, non-TLS; suitable for development)
+    --use-incluster-postgres  Use in-cluster PostgreSQL instead of Azure Database for PostgreSQL
+                            (suitable for development and subscriptions without Flexible Server)
     --skip-mek              Skip MEK configuration
     --force-mek             Replace existing MEK (data loss warning)
     --mek-config-file PATH  Use existing MEK config file
@@ -79,6 +81,7 @@ EXAMPLES:
     $(basename "$0") --use-acr
     $(basename "$0") --skip-backend
     $(basename "$0") --use-acr --use-incluster-redis
+    $(basename "$0") --use-incluster-redis --use-incluster-postgres
 EOF
 }
 
@@ -100,6 +103,7 @@ acr_name=""
 image_manifest=""
 skip_backend=false
 use_incluster_redis=false
+use_incluster_postgres=false
 skip_mek=false
 force_mek=false
 mek_config_file=""
@@ -133,8 +137,9 @@ while [[ $# -gt 0 ]]; do
         --acr-name)            acr_name="$2"; use_acr=true; shift 2 ;;
         --image-manifest)      image_manifest="$2"; shift 2 ;;
         --skip-backend)        skip_backend=true; shift ;;
-        --use-incluster-redis) use_incluster_redis=true; shift ;;
-        --skip-mek)            skip_mek=true; shift ;;
+        --use-incluster-redis)     use_incluster_redis=true; shift ;;
+        --use-incluster-postgres) use_incluster_postgres=true; shift ;;
+        --skip-mek)               skip_mek=true; shift ;;
         --force-mek)           force_mek=true; shift ;;
         --mek-config-file)     mek_config_file="$2"; shift 2 ;;
         --service-url)         service_url="$2"; shift 2 ;;
@@ -177,11 +182,15 @@ storage_account=$(tf_require "$tf_output" "storage_account.value.name" "Storage 
 osmo_identity_client_id=$(tf_require "$tf_output" "osmo_workload_identity.value.client_id" "OSMO identity")
 resource_group=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
 aks_cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster")
+pg_fqdn=$(tf_get "$tf_output" "postgresql_connection_info.value.fqdn" "")
+pg_user=$(tf_get "$tf_output" "postgresql_connection_info.value.admin_username" "")
+[[ "$use_incluster_postgres" == "true" ]] && pg_fqdn="" && pg_user=""
+if [[ -z "$pg_fqdn" && "$use_incluster_postgres" != "true" ]]; then
+    fatal "PostgreSQL FQDN not found in Terraform outputs. Use --use-incluster-postgres for non-production deployments."
+fi
 kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${aks_cluster}.yaml}"
 context="${context:-$aks_cluster}"
 verify_existing_aks_kubeconfig "$kubeconfig" "$context" "$expected_aks_resource_id"
-pg_fqdn=$(tf_require "$tf_output" "postgresql_connection_info.value.fqdn" "PostgreSQL FQDN")
-pg_user=$(tf_require "$tf_output" "postgresql_connection_info.value.admin_username" "PostgreSQL user")
 kv_name=$(tf_require "$tf_output" "key_vault_name.value" "Key Vault name")
 redis_hostname=$(tf_get "$tf_output" "managed_redis_connection_info.value.hostname" "")
 redis_port=$(tf_get "$tf_output" "managed_redis_connection_info.value.port" "10000")
@@ -247,7 +256,7 @@ if [[ "$config_preview" == "true" ]]; then
     print_kv "Storage Endpoint" "$endpoint"
     print_kv "Container" "$container"
     print_kv "Dataset Bucket" "training -> ${endpoint}/datasets"
-    print_kv "PostgreSQL" "$pg_fqdn"
+    print_kv "PostgreSQL" "${pg_fqdn:-in-cluster}"
     print_kv "Redis" "${redis_hostname:-in-cluster}"
     print_kv "Registry" "$([[ $use_acr == true ]] && echo "$acr_login_server" || echo 'nvcr.io')"
     print_kv "Image Manifest" "${image_manifest:-not used}"
@@ -327,15 +336,14 @@ done
 #------------------------------------------------------------------------------
 
 section "Configure Storage"
-if az storage container show --account-name "$storage_account" --name "$container" --auth-mode login &>/dev/null; then
+storage_account_id=$(az storage account show -n "$storage_account" --query "id" -o tsv)
+container_url="https://management.azure.com${storage_account_id}/blobServices/default/containers/${container}?api-version=2023-01-01"
+if az rest --method get --url "$container_url" &>/dev/null; then
     info "Container '$container' already exists"
 else
     info "Creating container '$container'..."
-    az storage container create \
-        --account-name "$storage_account" \
-        --name "$container" \
-        --auth-mode login \
-        --public-access off >/dev/null
+    az rest --method put --url "$container_url" \
+        --body '{"properties":{"publicAccess":"None"}}' >/dev/null
 fi
 
 #------------------------------------------------------------------------------
@@ -352,17 +360,40 @@ kubectl annotate sa router -n "$NS_OSMO_CONTROL_PLANE" "azure.workload.identity/
 tenant_id=$(az account show --query tenantId -o tsv)
 
 # Admin password (needed for osmo login token — K8s secret, not CSI-mounted)
-admin_password=$(az keyvault secret show --vault-name "$kv_name" --name osmo-admin-password --query value -o tsv)
+# Try Key Vault first; fall back to the Terraform output when KV public network
+# access is blocked by subscription policy (private-endpoint-only deployments).
+if admin_password=$(az keyvault secret show --vault-name "$kv_name" --name osmo-admin-password --query value -o tsv 2>/dev/null) && [[ -n "$admin_password" ]]; then
+    info "Read OSMO admin password from Key Vault"
+else
+    warn "Key Vault unreachable; falling back to terraform output for OSMO admin password"
+    admin_password=$(tf_require "$tf_output" "osmo_admin_password.value" "OSMO admin password")
+fi
 kubectl create secret generic osmo-default-admin -n "$NS_OSMO_CONTROL_PLANE" \
     --from-file=password=<(printf '%s' "$admin_password") \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 # Pre-create DB and Redis secrets so pods can start immediately.
 # CSI Secrets Store will take over rotation once pods mount the CSI volume.
-pg_password=$(az keyvault secret show --vault-name "$kv_name" --name psql-admin-password --query value -o tsv)
-kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
-    --from-file=db-password=<(printf '%s' "$pg_password") \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+pg_password=""
+include_postgres_secret=true
+if [[ "$use_incluster_postgres" == "true" ]]; then
+    include_postgres_secret=false
+    # Check if secret already has a non-empty password (idempotent re-runs).
+    pg_password=$(kubectl get secret db-secret -n "$NS_OSMO_CONTROL_PLANE" \
+        --ignore-not-found -o jsonpath='{.data.db-password}' 2>/dev/null | base64 --decode)
+    if [[ -z "$pg_password" ]]; then
+        pg_password=$(openssl rand -base64 24)
+        warn "In-cluster PostgreSQL: generated ephemeral dev password for db-secret."
+    fi
+    kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
+        --from-file=db-password=<(printf '%s' "$pg_password") \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+else
+    pg_password=$(az keyvault secret show --vault-name "$kv_name" --name psql-admin-password --query value -o tsv)
+    kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
+        --from-file=db-password=<(printf '%s' "$pg_password") \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+fi
 
 include_redis_secret=true
 if [[ "$use_incluster_redis" == "true" ]]; then
@@ -379,7 +410,7 @@ else
 fi
 
 # CSI Secrets Store: keeps secrets in sync with Key Vault after initial creation
-apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$kv_name" "$osmo_identity_client_id" "$tenant_id" "$include_redis_secret"
+apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$kv_name" "$osmo_identity_client_id" "$tenant_id" "$include_redis_secret" "$include_postgres_secret"
 
 #------------------------------------------------------------------------------
 # Phase 1d: Configure MEK (Master Encryption Key)
@@ -476,9 +507,8 @@ fi
 service_helm_args=(
     --version "$chart_version"
     --namespace "$NS_OSMO_CONTROL_PLANE"
-    --rollback-on-failure
+    --atomic
     --timeout "$TIMEOUT_DEPLOY"
-    --force-conflicts
     -f "$service_values"
     -f "$service_identity_values"
     -f "$platform_values"
@@ -491,12 +521,26 @@ service_helm_args=(
     --set-string "services.configs.workflow.workflow_app.credential.endpoint=${endpoint}/apps"
     --set-string "services.configs.dataset.default_bucket=training"
     --set-string "services.configs.dataset.buckets.training.dataset_path=${endpoint}/datasets"
-    --set-string "services.postgres.serviceName=$pg_fqdn"
-    --set-string "services.postgres.user=$pg_user"
     --set-string "services.configs.workflow.backend_images.init=${osmo_image_location}/init-container:${image_version}"
     --set-string "services.configs.workflow.backend_images.client=${osmo_image_location}/client:${image_version}"
     --set-string "gateway.envoy.image=envoyproxy/envoy@sha256:4e3c734cbe9892a3513c97cf3974ff73cfef5d784f5cceed9ea758a2b80e0c31"
 )
+
+if [[ -n "$pg_fqdn" ]]; then
+    service_helm_args+=(
+        --set-string "services.postgres.serviceName=$pg_fqdn"
+        --set-string "services.postgres.user=$pg_user"
+    )
+else
+    service_helm_args+=(
+        --set "services.postgres.enabled=true"
+        --set-string "services.postgres.serviceName=postgres"
+        --set-string "services.postgres.user=postgres"
+        --set-string "services.postgres.password=$pg_password"
+        --set "services.postgres.storageClassName=default"
+        --set "services.postgres.storageSize=10Gi"
+    )
+fi
 
 if [[ -n "$hil_backend_name" ]]; then
     export OSMO_HIL_BACKEND_NAME="$hil_backend_name"
@@ -526,6 +570,7 @@ if [[ -n "$redis_hostname" ]]; then
 else
     service_helm_args+=(
         --set "services.redis.enabled=true"
+        --set-string "services.redis.serviceName=redis"
         --set "services.redis.tlsEnabled=false"
         --set "services.redis.storageClassName=default"
         --set "services.redis.storageSize=1Gi"
@@ -730,7 +775,7 @@ PYTHON_EOF
     backend_helm_args=(
         --version "$backend_chart_version"
         --namespace "$NS_OSMO_OPERATOR"
-        --rollback-on-failure
+        --atomic
         --timeout "$TIMEOUT_DEPLOY"
         -f "$backend_values"
         -f "$backend_identity_values"

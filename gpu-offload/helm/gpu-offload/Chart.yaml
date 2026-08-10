@@ -2,7 +2,7 @@
 # Adapted from an upstream GPU-offloading reference implementation.
 apiVersion: v2
 name: gpu-offload
-description: Transparent GPU-offloading platform components (mutating webhook + node agent) for opt-in workloads.
+description: Transparent GPU-offloading platform components (mutating admission webhook + controller) for opt-in workloads.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -11,4 +11,4 @@ keywords:
   - gpu
   - offloading
   - admission-webhook
-  - daemonset
+  - controller

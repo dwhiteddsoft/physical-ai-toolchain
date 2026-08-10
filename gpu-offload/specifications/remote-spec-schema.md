@@ -1,38 +1,47 @@
-# remote.yaml offload-spec schema
+---
+title: remote.yaml Schema
+description: Schema and examples for remote.yaml offload specification
+ms.date: 2026-08-10
+ms.topic: reference
+---
 
-Schema for the `remote.yaml` offload specification that a workload's ConfigMap carries.
-`remote.yaml` names the GPU stages, classes, and functions that execute transparently in
-a server-stage pod. This schema is generic and embodiment-agnostic — it constrains no
-specific policy, robot, or framework.
+Specification for the `remote.yaml` ConfigMap consumed by the offload controller.
+The ConfigMap is referenced by annotation `xavierconfig` and contains this schema
+in the key `data.remote.yaml`.
 
-## Top-level keys
+## Overview
 
-`remote.yaml` declares three top-level keys. Each maps offloadable Python symbols onto a
-named GPU stage.
+Transparent GPU offloading runs a lightweight control container next to the robot
+while heavy inference executes in a GPU server-stage pod. Fully-qualified Python
+classes and functions named in `remote.yaml` execute in the server-stage pod with
+no application code changes.
 
-| Key             | Type               | Required | Meaning                                                               | Example                                                    |
-|-----------------|--------------------|----------|-----------------------------------------------------------------------|------------------------------------------------------------|
-| `serverstages`  | list of stage maps | Yes      | Named GPU worker pods that host offloaded classes and functions.      | one stage `gpu` with `nvidia.com/gpu: 1`                   |
-| `remoteclasses` | list of class maps | No       | Fully-qualified Python classes whose method calls execute in a stage. | `mypackage.policy/Policy` → stage `gpu`                    |
-| `remotefuncs`   | list of func maps  | No       | Fully-qualified Python functions that execute in a stage.             | `mypackage.checkpoint/Checkpoint/get_action` → stage `gpu` |
+The control container calls its policy as if it ran locally; the platform
+intercepts named symbols and routes execution to the GPU pod. This separation
+keeps the robot container lightweight while GPU capacity is reserved for inference.
 
-A workload that offloads at least one symbol declares `serverstages` plus at least one of
-`remoteclasses` or `remotefuncs`.
+## Top-Level Keys
+
+`remote.yaml` declares three optional top-level keys. At least one of `serverstages`,
+`remoteclasses`, or `remotefuncs` must be present.
+
+| Key | Type | Required | Purpose |
+|---|---|---|---|
+| `serverstages` | list of objects | Yes | Define named GPU worker pods |
+| `remoteclasses` | list of mappings | No | Classes whose methods execute in stages |
+| `remotefuncs` | list of mappings | No | Functions that execute in stages |
 
 ## serverstages
 
-A **stage** is a GPU worker pod that hosts the offloaded classes and functions. Each
-`remoteclasses` and `remotefuncs` entry targets a stage by name through its `remoteloc`
-field.
+A **stage** is a GPU worker pod hosting offloaded classes and functions.
 
-| Field       | Type   | Required | Meaning                                                                                      | Example                    |
-|-------------|--------|----------|----------------------------------------------------------------------------------------------|----------------------------|
-| `name`      | string | Yes      | Stage identifier referenced by `remoteloc` in class and function entries.                    | `gpu`                      |
-| `perclient` | bool   | Yes      | `false`: one shared stage pod serves every client. `true`: a dedicated stage pod per client. | `false`                    |
-| `resources` | map    | Yes      | Kubernetes resource requests/limits for the stage pod, including the GPU count.              | `limits.nvidia.com/gpu: 1` |
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | string | Yes | Stage identifier (empty string is default) |
+| `perclient` | boolean | Yes | `false`: shared pod; `true`: per-client pod |
+| `resources` | map | Yes | Kubernetes resource requests/limits |
 
-The `resources` map follows the standard Kubernetes container resources shape. GPU
-allocation is expressed under `resources.limits` with the `nvidia.com/gpu` key.
+**Example:**
 
 ```yaml
 serverstages:
@@ -43,16 +52,21 @@ serverstages:
         nvidia.com/gpu: 1
 ```
 
+The `resources` map follows standard Kubernetes container resource shape. GPU
+allocation is expressed under `resources.limits` with key `nvidia.com/gpu`.
+
 ## remoteclasses
 
-Each entry is a single-key map: the key is a fully-qualified class path, and its value
-selects the target stage. Method calls on instances of the class execute transparently in
-the stage pod — no application code change is required at the call site.
+Each entry is a single-key map: the key is a fully-qualified class path, value
+selects the target stage. Method calls on instances execute transparently in the
+stage pod.
 
-| Field       | Type   | Required | Meaning                                                     | Example                   |
-|-------------|--------|----------|-------------------------------------------------------------|---------------------------|
-| _(map key)_ | string | Yes      | Fully-qualified class path in `module.path/ClassName` form. | `mypackage.policy/Policy` |
-| `remoteloc` | string | Yes      | `name` of the `serverstages` entry that hosts the class.    | `gpu`                     |
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| _(map key)_ | string | Yes | Class path in `module.path/ClassName` form |
+| `remoteloc` | string | Yes | Target `serverstages` entry `name` |
+
+**Example:**
 
 ```yaml
 remoteclasses:
@@ -62,19 +76,20 @@ remoteclasses:
 
 ## remotefuncs
 
-Each entry is a single-key map: the key is a fully-qualified function or method path, and
-its value selects the target stage and declares instancing semantics. Calls to the
-function execute transparently in the stage pod.
+Each entry is a single-key map: the key is a fully-qualified function path, value
+selects the target stage and declares instancing semantics. Calls execute
+transparently in the stage pod.
 
-| Field            | Type   | Required | Meaning                                                                                                                                            | Example                                      |
-|------------------|--------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
-| _(map key)_      | string | Yes      | Fully-qualified path in `module.path/ClassName/method` or `module.path/function` form.                                                             | `mypackage.checkpoint/Checkpoint/get_action` |
-| `singleinstance` | bool   | No       | `true`: the underlying object (e.g. a loaded model) is instantiated once and shared across all calls. Omit or set `false` for per-call instancing. | `true`                                       |
-| `remoteloc`      | string | Yes      | `name` of the `serverstages` entry that hosts the function.                                                                                        | `gpu`                                        |
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| _(map key)_ | string | Yes | Path in `module.path/function` or `module.path/Class/method` form |
+| `singleinstance` | boolean | No | `true`: object instantiated once and shared; `false`: per-call |
+| `remoteloc` | string | Yes | Target `serverstages` entry `name` |
 
-Set `singleinstance: true` on the function that loads a heavy resource so the model loads
-once in the stage pod and every subsequent call reuses it. Leave it off for functions that
-must not share state between calls.
+Set `singleinstance: true` on functions that load heavy resources so the model
+loads once in the stage pod and every call reuses it.
+
+**Example:**
 
 ```yaml
 remotefuncs:
@@ -85,12 +100,10 @@ remotefuncs:
       remoteloc: gpu
 ```
 
-## Minimal valid remote.yaml
+## Minimal Valid Example
 
-The following is a complete, internally consistent `remote.yaml`. It declares one shared
-GPU stage `gpu`, offloads one class, and offloads two functions — one that loads a model
-once and shares it, one that runs per call. Every `remoteloc` references the declared
-stage `name`.
+Complete, internally consistent `remote.yaml` with one shared GPU stage, one
+offloaded class, and two offloaded functions (one with single instancing):
 
 ```yaml
 serverstages:
@@ -110,15 +123,49 @@ remotefuncs:
       remoteloc: gpu
 ```
 
-> [!NOTE]
-> A workload opts into offloading with the label `xavier: "true"` and an annotation
-> `xavierconfig` that points at a ConfigMap. That ConfigMap holds the `remote.yaml`
-> documented here under its `data.remote.yaml` key. The offload opt-in contract —
-> label, annotation, and ConfigMap wiring — is specified in
-> [gpu-offload.specification.md](./gpu-offload.specification.md).
+## Controller ConfigMap Fields (Deprecated)
+
+The following fields in the ConfigMap annotation are deprecated in favor of
+per-stage configuration. They are currently used by the controller but should
+not be relied upon in new code.
+
+| Field | Type | Implemented | Purpose |
+|---|---|---|---|
+| `serverimage` | string | Implemented | Image for server deployment |
+| `serverreplicas` | integer | Implemented | Number of deployment replicas |
+| `nodeSelector` | map | Implemented | Node selection for server pods |
+| `securityContext` | object | Implemented | Validated security context for containers |
+| `env` | list | Implemented | Environment variables for containers |
+| `noserverdeployment` | boolean | Implemented | Skip server deployment creation |
+| `remoteablecm` | string | Implemented | ConfigMap name (required) |
+| `remoteableconts` | list | Implemented | Container names to mutate (optional) |
+
+Future work will move configuration into the stage definitions above and deprecate
+these top-level fields.
 
 ## Scheduling
 
-No scheduling hints beyond `resources` appear in the `remote.yaml` body; pod placement
-(node selectors, runtime class) is configured on the workload rather than in the offload
-spec.
+Pod placement (node selectors, runtime class, tolerations) is configured on the
+workload rather than in `remote.yaml`. The offload spec focuses on what to offload
+and to which stage; infrastructure concerns remain workload-level.
+
+## Validation
+
+Implementers should validate:
+
+1. Each `serverstages[*].name` is unique
+2. Each `remoteloc` references a declared stage `name`
+3. `resources.limits.nvidia.com/gpu` is a positive integer when GPU offloading
+4. Class and function paths follow `module.path/Name` format
+5. `singleinstance` is only used for functions/methods, not classes
+
+## Workload Opt-In Contract
+
+A workload opts in with three signals (see
+[gpu-offload.specification.md](./gpu-offload.specification.md)):
+
+1. Label `xavier: "true"`
+2. Annotation `xavierconfig: <configmap-name>`
+3. Env `REMOTERPORT` in main container
+
+The ConfigMap holds this `remote.yaml` under key `data.remote.yaml`.

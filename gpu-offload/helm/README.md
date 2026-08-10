@@ -1,9 +1,9 @@
 # GPU-Offload Helm Chart
 
-Deploys the transparent GPU-offloading platform components — a mutating admission
-webhook and a privileged node agent — that let opt-in workloads run their GPU stages
-remotely. The chart is registry-parameterized and consumes prebuilt external images;
-it does not build them.
+Deploys the transparent GPU-offloading mutating admission webhook controller that
+enables opt-in workloads to be rewritten for GPU offloading. The chart deploys a
+non-root controller, ServiceAccount, RBAC, and TLS wiring. The chart is
+registry-parameterized and consumes prebuilt external images; it does not build them.
 
 ## 📋 Prerequisites
 
@@ -11,23 +11,23 @@ it does not build them.
 |-------------------|------------------------------------------------------------------------------|
 | Kubernetes        | 1.27+ with admission webhooks enabled                                        |
 | Helm              | 3.12+                                                                        |
-| cert-manager      | Installed cluster-wide when `mutate.certManager.enabled` is `true` (default) |
-| Offloading images | `xavier-mutate` and `pyremote` mirrored into your registry                   |
+| cert-manager      | Optional. Install cluster-wide when `mutate.certManager.enabled` is `true`. The chart defaults to a local-friendly mode that does not require cert-manager. |
+| Offloading images | `xavier-mutate` (mutate controller) mirrored into your registry                   |
 | Registry access   | Workload identity (preferred) or an image pull secret                        |
 
 > [!IMPORTANT]
-> This chart is inert without the external `xavier-mutate` and `pyremote` images. It
-> carries the deployment topology only; the offloading engine ships as prebuilt
-> images that you supply via `image.registry`.
+> This chart requires the mutate controller image (`xavier-mutate`). The chart
+> carries the deployment topology only; the mutate controller is provided as a
+> prebuilt image that you supply via `image.registry` or via fully-qualified
+> references in `values.yaml`.
 
 ## 🚀 Quick Start
 
 ```bash
 helm install gpu-offload gpu-offload/helm/gpu-offload \
   --namespace gpu-offload --create-namespace \
-  --set image.registry=example.azurecr.io \
-  --set mutate.image.digest=sha256:<mutate-digest> \
-  --set nodeAgent.image.digest=sha256:<pyremote-digest>
+  --set image.registry=ghcr.io/my-org \
+  --set mutate.image.digest=sha256:<mutate-digest>
 ```
 
 Render the manifests without installing to review them first:
@@ -41,7 +41,7 @@ helm template gpu-offload gpu-offload/helm/gpu-offload \
 
 | Value                         | Default                      | Description                                                                  |
 |-------------------------------|------------------------------|------------------------------------------------------------------------------|
-| `image.registry`              | `<your-registry>.azurecr.io` | Registry hosting the offloading images. Set to your registry.                |
+| `image.registry`              | `""`                       | Neutral registry. Leave empty to use fully-qualified image names in values, or set to your registry (e.g. `ghcr.io/my-org`). |
 | `image.pullPolicy`            | `IfNotPresent`               | Pull policy applied to every container.                                      |
 | `imagePullSecrets`            | `[]`                         | Pull secret references. Prefer workload identity; leave empty when using it. |
 | `mutate.image.repository`     | `xavier-mutate`              | Mutate controller image name within `image.registry`.                        |
@@ -49,27 +49,24 @@ helm template gpu-offload gpu-offload/helm/gpu-offload \
 | `mutate.image.digest`         | `""`                         | `sha256:` digest pin. Wins over `tag` when set.                              |
 | `mutate.webhookPort`          | `6443`                       | TLS port for the webhook Service and endpoint.                               |
 | `mutate.logLevel`             | `warning`                    | Mutate controller log verbosity.                                             |
-| `mutate.certManager.enabled`  | `true`                       | Provision webhook TLS and CA injection via cert-manager.                     |
-| `mutate.certManager.duration` | `4320h`                      | Serving certificate validity window.                                         |
-| `nodeAgent.image.repository`  | `pyremote`                   | Node agent image name within `image.registry`.                               |
-| `nodeAgent.image.tag`         | `""`                         | Mutable tag. Leave empty and prefer a digest.                                |
-| `nodeAgent.image.digest`      | `""`                         | `sha256:` digest pin. Wins over `tag` when set.                              |
-| `libPath`                     | `/opt/xavier/lib`            | Host path where the node agent stages the client library.                    |
-| `serverPort`                  | `30000`                      | GPU-stage server port.                                                       |
-| `remoterPort`                 | `30001`                      | Client remoter port (exported as `REMOTERPORT`).                             |
+| `mutate.certManager.enabled`  | `false`                      | Use cert-manager to provision TLS and CA injection when `true` (production). |
+| `mutate.certManager.duration` | `4320h`                      | Serving certificate validity window (when using cert-manager).              |
+| `mutate.tls.secretName`       | `""`                       | Use an existing `kubernetes.io/tls` Secret in this namespace (preferred).    |
+| `mutateScheduling.nodeSelector.kubernetes.io/arch` | `amd64` | Default architecture selector for the controller pod. Change this for non-amd64 clusters. |
+
+Node-agent staging and privileged hostPath mounts have been removed from this
+chart. Mutated workloads should bundle or provide their client libraries via
+their own init mechanisms or images.
 
 ## 🔑 External-image prerequisite
 
-The chart references two real image names — `xavier-mutate` and `pyremote` — but only
-through `image.registry`. Mirror both images into a registry you control, then point
-`image.registry` at it. No internal registry FQDN is embedded in the chart.
+The chart references the mutate controller image `xavier-mutate` via `image.registry`.
+Mirror the image into a registry you control and set `image.registry` accordingly.
 
 ```bash
 # Example: mirror into your registry (source registry supplied out of band).
 crane copy <source-registry>/xavier-mutate@sha256:<digest> \
-  example.azurecr.io/xavier-mutate@sha256:<digest>
-crane copy <source-registry>/pyremote@sha256:<digest> \
-  example.azurecr.io/pyremote@sha256:<digest>
+  example.registry.io/xavier-mutate@sha256:<digest>
 ```
 
 Grant the cluster pull access with workload identity where possible:
@@ -87,7 +84,8 @@ values files.
 Pin both images to immutable `sha256:` digests rather than mutable tags. A digest is
 tamper-evident and reproducible; a tag can be repointed after review.
 
-- Set `mutate.image.digest` and `nodeAgent.image.digest`; leave the `tag` fields empty.
+Set `mutate.image.digest`; leave the `tag` field empty.
+
 - When a digest is set it takes precedence over any tag.
 - When neither digest nor tag is set, the runtime resolves the registry default
   (typically `:latest`) — acceptable only for throwaway evaluation.
@@ -109,6 +107,9 @@ cross-machine offload of control-loop functions requires explicit review.
 
 | Template                              | Kind                                    | Purpose                                                          |
 |---------------------------------------|-----------------------------------------|------------------------------------------------------------------|
-| `templates/mutate-deployment.yaml`    | Deployment, Service, RBAC, cert-manager | Runs the mutate controller and its serving certificate.          |
-| `templates/mutating-webhook.yaml`     | MutatingWebhookConfiguration            | Registers the `/mutate` webhook, selected on the `xavier` label. |
-| `templates/node-agent-daemonset.yaml` | DaemonSet                               | Stages the client library to each node's `libPath`.              |
+| `templates/mutate-deployment.yaml`    | ServiceAccount, Service, Deployment      | Runs the mutate controller.                                      |
+| `templates/mutating-webhook.yaml`     | Secret, Issuer, Certificate, webhook     | Registers the authoritative mutating webhook and TLS materials.  |
+
+> [!NOTE]
+> When the chart generates the TLS Secret, Helm reuses it on upgrade through
+> `lookup`. Delete the Secret to force certificate rotation.

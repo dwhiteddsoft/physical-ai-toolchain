@@ -62,11 +62,37 @@ Usage: include "gpu-offload.image" (dict "registry" .Values.image.registry "imag
 {{- define "gpu-offload.image" -}}
 {{- $registry := .registry -}}
 {{- $image := .image -}}
+{{- $hasRegistry := and $registry (ne $registry "") -}}
 {{- if $image.digest -}}
-{{- printf "%s/%s@%s" $registry $image.repository $image.digest -}}
+	{{- if $hasRegistry -}}
+		{{- printf "%s/%s@%s" $registry $image.repository $image.digest -}}
+	{{- else -}}
+		{{- printf "%s@%s" $image.repository $image.digest -}}
+	{{- end -}}
 {{- else if $image.tag -}}
-{{- printf "%s/%s:%s" $registry $image.repository $image.tag -}}
+	{{- if $hasRegistry -}}
+		{{- printf "%s/%s:%s" $registry $image.repository $image.tag -}}
+	{{- else -}}
+		{{- printf "%s:%s" $image.repository $image.tag -}}
+	{{- end -}}
 {{- else -}}
-{{- printf "%s/%s" $registry $image.repository -}}
+	{{- if $hasRegistry -}}
+		{{- printf "%s/%s" $registry $image.repository -}}
+	{{- else -}}
+		{{- printf "%s" $image.repository -}}
+	{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Mutate webhook TLS secret name.
+Uses the supplied secret when present, otherwise falls back to the chart-managed
+secret name used by cert-manager and the built-in generated TLS flow.
+*/}}
+{{- define "gpu-offload.mutate.tlsSecretName" -}}
+{{- if .Values.mutate.tls.secretName -}}
+{{- .Values.mutate.tls.secretName -}}
+{{- else -}}
+{{- printf "%s-mutate-tls" (include "gpu-offload.fullname" .) -}}
 {{- end -}}
 {{- end -}}

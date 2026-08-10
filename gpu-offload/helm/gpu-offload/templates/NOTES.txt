@@ -7,31 +7,29 @@ gpu-offload {{ .Chart.Version }} installed into namespace "{{ .Release.Namespace
 This chart consumes prebuilt external images; it does not build them. Confirm the
 components are running before labeling any workload for offloading.
 
-1. Mutate controller is Available:
+1. Mutate controller is available:
 
    kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "gpu-offload.fullname" . }}-mutate
 
-2. Node agent DaemonSet is Ready on every eligible node:
-
-   kubectl -n {{ .Release.Namespace }} get daemonset {{ include "gpu-offload.fullname" . }}-node-agent
-
-3. MutatingWebhookConfiguration is registered:
+2. MutatingWebhookConfiguration is registered:
 
    kubectl get mutatingwebhookconfiguration {{ include "gpu-offload.fullname" . }}-mutate
 
-4. Confirm the resolved image references are digest-pinned (recommended):
+3. Confirm the resolved image references are digest-pinned (recommended):
 
    mutate:     {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.mutate.image) }}
-   node-agent: {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.nodeAgent.image) }}
 
-{{- if or (not .Values.mutate.image.digest) (not .Values.nodeAgent.image.digest) }}
+   {{- if not .Values.mutate.image.digest }}
 
-   WARNING: one or more images are not digest-pinned. Set `mutate.image.digest` and
-   `nodeAgent.image.digest` to sha256 values for reproducible, tamper-evident deploys.
-{{- end }}
+      WARNING: the mutate image is not digest-pinned. Set `mutate.image.digest` to
+      a sha256 value for reproducible, tamper-evident deploys.
+   {{- end }}
 
 Opt a workload into offloading by adding the label `xavier: "true"` and an
 `xavierconfig` annotation referencing a ConfigMap that holds its `remote.yaml`.
+
+When the chart generates the TLS Secret, Helm reuses it on upgrade through
+`lookup`. Delete the Secret to force certificate rotation.
 
 > CAUTION: Offloading a `get_action` call across machines injects network latency and
 > jitter into a 15-50 Hz control loop, a stability and safety risk. Same-node offload

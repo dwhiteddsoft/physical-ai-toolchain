@@ -1,111 +1,97 @@
-# GPU Offload Contract
+---
+title: GPU Offload Specification
+description: Opt-in contract and behavior specification
+ms.date: 2026-08-10
+ms.topic: specification
+---
 
-Authoritative description of the opt-in GPU-offloading contract a workload consumes,
-independent of any specific robot or demo. This document specifies the contract this
-domain consumes; it does not describe the closed offloading engine beyond the
-observable, consumer-facing behavior.
+Authoritative specification for the opt-in GPU-offloading contract a workload
+consumes and the mutating controller's observable behavior.
 
-## Purpose
+## Opt-in Contract
 
-Transparent GPU offloading runs a light control/main container next to the robot while
-heavy inference executes in a GPU **server-stage** pod. Fully-qualified Python classes
-and functions named in an offload spec execute in the server-stage pod instead of the
-main container, with no application code change. The main container calls its policy as
-if it ran locally; the platform intercepts the named symbols and routes their execution
-to the GPU pod.
+A workload opts in through three required signals. Omitting any one disables
+offloading for that workload.
 
-This separation keeps the robot-facing control container lightweight and schedulable on
-non-GPU hardware, while GPU capacity is reserved for the inference stages that need it.
+| Signal | Location | Value | Purpose |
+|---|---|---|---|
+| Label `xavier` | Workload metadata | `"true"` | Select for mutation |
+| Annotation `xavierconfig` | Workload metadata | ConfigMap name | Reference remote.yaml |
+| Env `REMOTERPORT` | Main container | Port (e.g. `30001`) | Server endpoint |
 
-## Opt-in mechanism
+The annotation value points to a ConfigMap containing the `remote.yaml` offload
+specification. See [remote-spec-schema.md](./remote-spec-schema.md) for schema.
 
-A workload opts in through three signals. All three are required; omitting any one
-disables offloading for that workload.
+## Controller Behavior
 
-| Signal                    | Location                                    | Value                                                   | Role                                                                            |
-|---------------------------|---------------------------------------------|---------------------------------------------------------|---------------------------------------------------------------------------------|
-| Label `xavier`            | Workload metadata and pod template metadata | `"true"` (also accepts `True`, `TRUE`, `1`)             | Selects the workload for the mutating webhook                                   |
-| Annotation `xavierconfig` | Workload metadata                           | Inline config referencing the offload ConfigMap by name | Points the platform at the `remote.yaml` offload spec and declares injected env |
-| Env `REMOTERPORT`         | Main container                              | Server-stage port (for example `30000`)                 | Tells the main container where to reach the remoting server                     |
+The mutating webhook watches Pods, Deployments, Jobs, and StatefulSets.
 
-The `xavierconfig` annotation references a ConfigMap that holds the `remote.yaml`
-offload spec and lists environment variables to inject into the workload. The offload
-spec schema is defined in [remote-spec-schema.md](./remote-spec-schema.md).
+When a workload carries all three opt-in signals:
 
-```yaml
-metadata:
-  labels:
-    xavier: "true"
-  annotations:
-    xavierconfig: |
-      remoteablecm: <offload-configmap-name>
-      env:
-        - name: REMOTERPORT
-          value: "30001"
-```
+1. The controller adds a ConfigMap volume mount (read-only at `/xavierconfig`)
+2. The controller injects `REMOTER_CONFIG`, `CONFIGFROMKUBE`, `XAVIER_CONTAINER`,
+   and downward API identity fields
+3. The reconciler creates server Deployments for configured server stages
+4. Generated server containers receive a readiness probe for `/ready.txt`
 
-## Runtime topology
+The controller does not:
 
-The mutating webhook injects a GPU server-stage pod alongside the main container. A
-node-agent DaemonSet stages the remoting library onto each node so the main container
-can load it without shipping it in the application image.
+- Add hostPath volumes, host namespaces, or privileged security contexts
+- Modify the application container entrypoint or command
+- Add a readiness probe to application containers
 
-| Component            | Origin                    | Responsibility                                                                                     |
-|----------------------|---------------------------|----------------------------------------------------------------------------------------------------|
-| Main container       | Consumer workload         | Runs the control loop; calls offloaded symbols through the remoting library                        |
-| Server-stage pod     | Injected by the webhook   | Holds GPU resources (for example `nvidia.com/gpu: 1`) and executes offloaded classes and functions |
-| Node-agent DaemonSet | Platform (prebuilt image) | Stages the remoting library to `/opt/xavier/lib` (`libPath`) on every node                         |
-| Mutating webhook     | Platform (prebuilt image) | Matches the `xavier` label and injects the server-stage pod and wiring                             |
+**Container filtering:**
 
-Two ports carry offload traffic:
+If `xavierconfig` includes `remoteableconts` list, only those named containers
+are mutated; others are left unchanged.
 
-| Port          | Default | Purpose                                                             |
-|---------------|---------|---------------------------------------------------------------------|
-| `serverPort`  | `30000` | Remoting server inside the server-stage pod                         |
-| `remoterPort` | `30001` | Remoter endpoint the main container connects to (env `REMOTERPORT`) |
+## Configuration Fields
 
-The remoting library is staged to `/opt/xavier/lib` on the host and made available to
-the main container by the node-agent; the workload does not build or vendor it.
+The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 
-## What you provide vs. what the platform provides
+| Field | Type | Implemented | Notes |
+|---|---|---|---|
+| `serverimage` | string | Implemented | Server container image; defaults to application image |
+| `serverreplicas` | integer | Implemented | Server Deployment replica count |
+| `nodeSelector` | map[string]string | Implemented | Server pod node selection |
+| `securityContext` | object | Implemented | Validated server container security context |
+| `env` | list of name/value | Implemented | Environment merged into server container |
+| `noserverdeployment` | boolean | Implemented | Skips server Deployment creation |
+| `serverstages` | list of stage objects | Implemented | Shared and per-client server stages |
+| `remoteablecm` | string | Implemented | ConfigMap name (required by controller) |
+| `remoteableconts` | list of strings | Implemented | Container names to mutate (optional filter) |
 
-The consumer owns the opt-in surface. The platform owns the engine, delivered as
-prebuilt external images.
+## Behavior Guarantees
 
-| Responsibility                                        | Provided by consumer | Provided by platform |
-|-------------------------------------------------------|----------------------|----------------------|
-| Workload label `xavier: "true"`                       | Yes                  | —                    |
-| Annotation `xavierconfig`                             | Yes                  | —                    |
-| Offload ConfigMap holding `remote.yaml`               | Yes                  | —                    |
-| Env `REMOTERPORT` on the main container               | Yes                  | —                    |
-| Choice of `serverPort` / `remoterPort`                | Yes                  | —                    |
-| Mutating webhook that injects the server-stage pod    | —                    | Yes (prebuilt image) |
-| Node-agent DaemonSet that stages the remoting library | —                    | Yes (prebuilt image) |
-| Remoting library at `/opt/xavier/lib`                 | —                    | Yes                  |
-| GPU scheduling of the server-stage pod                | —                    | Yes                  |
+1. Mutation is opt-in: controller only acts on workloads with all three signals
+2. Immutable remote.yaml: ConfigMap mounted read-only
+3. No privilege escalation: controller never adds privileged contexts
+4. Atomic per-workload: all containers in a workload see consistent mutation
+5. Idempotent: re-applying the same workload manifest produces same result
 
-The platform images are an external prerequisite pulled from a parameterized registry.
-This domain does not build them.
+## Validation
 
-## Safety and performance
+Test coverage:
 
-Offloading a symbol moves its execution off the main container. When the server-stage
-pod runs on a different machine, every call to that symbol crosses the network.
+1. Unit tests for config parsing and workload filtering
+2. Integration test: annotated Pod with ConfigMap produces expected mutations
+3. Security review: generated manifests have no privilege escalation
+4. Edge cases: malformed YAML, missing ConfigMaps, unrecognized container names
 
-> [!WARNING]
-> Cross-machine offload of a control-loop call such as `get_action` injects network
-> latency and jitter into a 15–50 Hz control loop. Round-trip variance on each cycle
-> degrades closed-loop stability and can create a safety hazard on real hardware.
-> Offload closed-loop control calls to a **same-node** server-stage pod only. Reserve
-> cross-machine offload for non-real-time stages (for example one-shot model loading or
-> batch inference) where added latency does not enter the control loop.
+## Unsupported / Deferred Features
 
-For closed-loop control, keep the server-stage pod on the same node as the main
-container so offload traffic stays on the loopback or host network rather than the
-cluster fabric.
+The following are planned but NOT currently implemented:
 
-## Cross-reference
+- `hostPath`-driven SDK delivery and node-agent deployment
+- Docker socket mounting and runtime package installation
+- Host network, PID, or IPC namespace propagation
+- Legacy pickle compatibility
 
-See [remote-spec-schema.md](./remote-spec-schema.md) for the `remote.yaml` schema:
-`serverstages`, `remoteclasses`, and `remotefuncs`, including the `singleinstance`
-flag.
+These are documented in [XAVIER-PORTING.md](../XAVIER-PORTING.md) as deviations
+or planned work.
+
+## Tier Model
+
+GPU offloading is a T3–T4 capability (single-site to multi-site deployment
+topology). It is NOT T5 (fleet intelligence). See
+[docs/design/tier-model.md](../../docs/design/tier-model.md).

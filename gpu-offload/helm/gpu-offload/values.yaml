@@ -5,7 +5,9 @@
 # NOT build these images; they are consumed as prebuilt external artifacts. Set to
 # the registry you have mirrored the images into (placeholder shown below).
 image:
-  registry: <your-registry>.azurecr.io
+  # Neutral default registry: leave empty to use fully-qualified image names
+  # or set to your registry (e.g. ghcr.io/my-org, docker.io/my-org).
+  registry: ""
   # Applied to every container in this chart.
   pullPolicy: IfNotPresent
 
@@ -30,31 +32,32 @@ mutate:
     digest: ""
   # -- TLS port the webhook Service and admission endpoint listen on.
   webhookPort: 6443
-  # -- Log verbosity for the mutate controller (error | warning | info | debug).
+  # Log verbosity for the mutate controller (error | warning | info | debug).
   logLevel: warning
-  # -- cert-manager supplies the webhook serving certificate and injects the CA
-  # bundle. Disable only if you provision the webhook TLS material another way.
+  # TLS mode options (choose one):
+  # - certManager.enabled: true  -> use cert-manager Certificate (recommended for production)
+  # - tls.secretName: <name>     -> use an existing `kubernetes.io/tls` Secret in this namespace
   certManager:
-    enabled: true
-    # Certificate validity window.
+    enabled: false
+    # Certificate validity window (used only when cert-manager is enabled).
     duration: 4320h
+  tls:
+    # Optional: reference an existing Secret that contains `tls.crt`, `tls.key`, and `ca.crt`.
+    secretName: ""
 
-# -- Privileged node agent DaemonSet that stages the offloading client library onto
-# each node under `libPath` so mutated workloads can load it via a hostPath mount.
-nodeAgent:
-  image:
-    # -- Real image name consumed from `image.registry`.
-    repository: pyremote
-    # -- Leave `tag` empty and set `digest` to a sha256 pin (recommended). When
-    # `digest` is set it wins over `tag`.
-    tag: ""
-    digest: ""
+# Pod scheduling and security defaults for the mutate controller. These are
+# conservative, non-privileged defaults suitable for most clusters and can be
+# overridden per-environment.
+mutateScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+  affinity: {}
 
-# -- Host path where the node agent stages the offloading client library and where
-# mutated workloads expect to find it (mounted from the node's `/opt`).
-libPath: /opt/xavier/lib
-
-# -- Offloading runtime ports. `serverPort` is the GPU-stage server; `remoterPort`
-# is the client remoter endpoint (exported to the node agent as `REMOTERPORT`).
-serverPort: 30000
-remoterPort: 30001
+mutateSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

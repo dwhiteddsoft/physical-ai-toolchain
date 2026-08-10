@@ -1,40 +1,66 @@
 # SPDX-License-Identifier: MIT
 # Adapted from an upstream GPU-offloading reference implementation.
-#
-# Mutating webhook controller: serving certificate (optional, via cert-manager),
-# RBAC, Service, and Deployment. The controller rewrites opt-in workloads so their
-# GPU stages run against the offloading node agent.
-{{- if .Values.mutate.certManager.enabled }}
-apiVersion: cert-manager.io/v1
-kind: Issuer
+
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: {{ include "gpu-offload.fullname" . }}-issuer
+  name: {{ include "gpu-offload.fullname" . }}-mutate
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "gpu-offload.labels" . | nindent 4 }}
-spec:
-  selfSigned: {}
 ---
-apiVersion: cert-manager.io/v1
-kind: Certificate
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
 metadata:
-  name: {{ include "gpu-offload.fullname" . }}-mutate-cert
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "gpu-offload.fullname" . }}-mutate
   labels:
     {{- include "gpu-offload.labels" . | nindent 4 }}
-spec:
-  secretName: {{ include "gpu-offload.fullname" . }}-mutate-tls
-  dnsNames:
-    - {{ include "gpu-offload.fullname" . }}-mutate
-    - {{ include "gpu-offload.fullname" . }}-mutate.{{ .Release.Namespace }}.svc
-    - {{ include "gpu-offload.fullname" . }}-mutate.{{ .Release.Namespace }}.svc.cluster.local
-  issuerRef:
-    name: {{ include "gpu-offload.fullname" . }}-issuer
-  duration: {{ .Values.mutate.certManager.duration }}
-  privateKey:
-    rotationPolicy: Always
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
 ---
-{{- end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gpu-offload.fullname" . }}-mutate
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gpu-offload.fullname" . }}-mutate
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpu-offload.fullname" . }}-mutate
+    namespace: {{ .Release.Namespace }}
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -45,52 +71,12 @@ metadata:
     app.kubernetes.io/component: mutate
 spec:
   ports:
-    - name: mutator
+    - name: webhook
       port: {{ .Values.mutate.webhookPort }}
-      targetPort: {{ .Values.mutate.webhookPort }}
+      targetPort: webhook
   selector:
     {{- include "gpu-offload.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: mutate
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "gpu-offload.fullname" . }}-mutate
-  labels:
-    {{- include "gpu-offload.labels" . | nindent 4 }}
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "configmaps", "pods/log", "pods/exec", "secrets"]
-    verbs: ["*"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "deployments/scale", "statefulsets", "statefulsets/scale"]
-    verbs: ["*"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["*"]
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ include "gpu-offload.fullname" . }}-mutate
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "gpu-offload.labels" . | nindent 4 }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ include "gpu-offload.fullname" . }}-mutate
-  labels:
-    {{- include "gpu-offload.labels" . | nindent 4 }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "gpu-offload.fullname" . }}-mutate
-    namespace: {{ .Release.Namespace }}
-roleRef:
-  kind: ClusterRole
-  name: {{ include "gpu-offload.fullname" . }}-mutate
-  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -122,39 +108,48 @@ spec:
         - name: mutate
           image: {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.mutate.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["/usr/bin/python3", "/app/mutate.py", "--port", {{ .Values.mutate.webhookPort | quote }}]
+          command:
+            - /usr/bin/python3
+            - /app/mutate.py
+            - --port
+            - {{ .Values.mutate.webhookPort | quote }}
+            - --cert-file
+            - /certs/tls.crt
+            - --key-file
+            - /certs/tls.key
+          ports:
+            - name: webhook
+              containerPort: {{ .Values.mutate.webhookPort }}
           securityContext:
-            privileged: true
-          {{- if .Values.mutate.certManager.enabled }}
+            runAsNonRoot: {{ .Values.mutateSecurityContext.runAsNonRoot }}
+            runAsUser: {{ .Values.mutateSecurityContext.runAsUser }}
+            allowPrivilegeEscalation: {{ .Values.mutateSecurityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.mutateSecurityContext.readOnlyRootFilesystem }}
+            capabilities:
+              drop:
+                {{- toYaml .Values.mutateSecurityContext.capabilities.drop | nindent 16 }}
           volumeMounts:
             - name: webhook-tls
               mountPath: /certs
               readOnly: true
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
-          {{- else }}
-          volumeMounts:
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
-          {{- end }}
           env:
-            - name: XAVIER_LIB_PATH
-              value: {{ .Values.libPath | quote }}
             - name: PRINTLOGLEVEL
               value: {{ .Values.mutate.logLevel | quote }}
             - name: LOGLEVEL
               value: {{ .Values.mutate.logLevel | quote }}
-            - name: SERVERPORT
-              value: {{ .Values.serverPort | quote }}
-            - name: REMOTERPORT
-              value: {{ .Values.remoterPort | quote }}
+      {{- with .Values.mutateScheduling.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mutateScheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mutateScheduling.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
-        {{- if .Values.mutate.certManager.enabled }}
         - name: webhook-tls
           secret:
-            secretName: {{ include "gpu-offload.fullname" . }}-mutate-tls
-        {{- end }}
-        - name: docker-sock
-          hostPath:
-            path: /var/run/docker.sock
-            type: Socket
+            secretName: {{ include "gpu-offload.mutate.tlsSecretName" . }}

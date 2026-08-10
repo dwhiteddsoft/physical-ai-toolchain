@@ -1,79 +1,114 @@
-# GPU Offload
+---
+title: GPU Offload (Xavier) Integration
+description: Transparent GPU offloading for robot inference
+ms.date: 2026-08-10
+ms.topic: overview
+---
 
-Transparent GPU offloading for robot inference: run a light control/main container next
-to the robot while heavy inference executes in a GPU server-stage pod, with no
-application code change. Offloading is opt-in through a workload label and annotation
-contract. This domain carries the offloading **contract and deployment topology**; the
-offloading engine ships as prebuilt external images.
-
-## 🧭 Overview
-
-A workload opts into offloading with the label `xavier: "true"` and an annotation
-`xavierconfig` that points at a ConfigMap holding a `remote.yaml` offload spec. A
-mutating webhook injects a GPU **server-stage** pod alongside the main container, and a
-node-agent DaemonSet stages the remoting library onto the node. Fully-qualified Python
-classes and functions named in `remote.yaml` execute transparently in the server-stage
-pod.
+Transparent GPU offloading for robot inference: run a lightweight control container
+next to the robot while heavy inference executes in a GPU server-stage pod. Offloading
+is opt-in through workload label and annotation.
 
 ## 📋 Prerequisites
 
-- A Kubernetes cluster with GPU nodes and the NVIDIA device plugin available.
-- The offloading engine images (`xavier-mutate` and `pyremote`), published to a
-  registry your cluster can pull from. This domain does **not** build these images;
-  supply them and set the registry through the Helm value `image.registry`.
-- Helm 3 and `kubectl` configured against the target cluster.
-- A robot control workload that can be annotated to opt into offloading (the bundled
-  example targets an SO-101 arm over ROS 2).
+| Requirement | Minimum |
+|---|---|
+| Kubernetes cluster | GPU nodes with NVIDIA device plugin |
+| Container images | `xavier-mutate` and `pyremote` in accessible registry |
+| Tools | Helm 3 and `kubectl` configured |
+| Python (controller tests) | 3.12 |
+| Podman (local development) | Latest stable |
 
-## 🚀 Quick Start
+## 🚀 Quick Start (cluster)
 
-1. Install the offloading control plane with the parameterized registry:
+1. Install the control plane:
 
    ```bash
    helm install gpu-offload ./helm/gpu-offload \
      --set image.registry=<your-registry>.azurecr.io
    ```
 
-2. Follow the end-to-end walkthrough in the SO-101 real-hardware example, which wires a
-   control workload to a GPU server-stage pod via a `remote.yaml` offload spec:
-   [examples/so101-real-hardware/README.md](./examples/so101-real-hardware/README.md).
+2. Add the `xavier: "true"` label and annotate workloads with `xavierconfig` pointing
+   to a ConfigMap holding `remote.yaml`.
 
-See [helm/README.md](./helm/README.md) for the full chart values and digest-pinning
-guidance.
+3. See [examples/so101-real-hardware/README.md](./examples/so101-real-hardware/README.md)
+   for an end-to-end example (SO-101 arm with ROS 2 bridge)
 
-## 🗂️ Layout
+## ⚙️ Configuration
 
-```text
-gpu-offload/
-├── specifications/            # Offload contract and remote.yaml schema
-│   ├── gpu-offload.specification.md
-│   └── remote-spec-schema.md
-├── helm/                      # Parameterized deployable scaffolding
-│   ├── README.md
-│   └── gpu-offload/           # Chart: webhook, mutation, node-agent DaemonSet
-└── examples/
-    └── so101-real-hardware/   # SO-101 offload example
-        ├── remote.yaml
-        ├── manifests/         # ConfigMap + control workload
-        └── ros2_bridge/       # LeRobot ROS 2 bridge for the example
-```
+Workload opt-in requires three signals:
 
-## ⚠️ Scope & limitations
+| Signal | Location | Value | Purpose |
+|---|---|---|---|
+| Label `xavier` | Pod metadata | `"true"` | Select for mutation |
+| Annotation `xavierconfig` | Workload metadata | ConfigMap name | Reference remote.yaml |
+| Env `REMOTERPORT` | Main container | Port (e.g. 30001) | Server endpoint |
 
-- This domain provides the offloading **contract, deployment scaffolding, and a reference
-  example** — not the offloading engine.
-- The offloading engine images are an external prerequisite; this domain does not build
-  them.
-- The real-hardware example has not been validated end-to-end; adapt it to your hardware.
+The `xavierconfig` annotation points to a ConfigMap containing `remote.yaml`. See
+[specifications/remote-spec-schema.md](./specifications/remote-spec-schema.md) for
+schema documentation.
 
-## 🧩 Tier mapping
+## 🏗️ Architecture
 
-GPU offloading is a cluster-level deployment-topology capability: a mutating webhook, a
-node-agent DaemonSet, and injected GPU server-stage pods. It therefore aligns with the
-**T3–T4-style deployment and fleet-delivery concerns** described in the canonical
-[tier-model.md](../docs/design/tier-model.md) — single-site declarative Kubernetes
-deployment (T3 — Production) extending to multi-site scale (T4 — Scale). It is not a
-fleet-intelligence (T5) capability: it delivers and runs inference topology and performs
-no drift detection, retraining, or aggregate analytics. This mapping references the
-canonical tiers rather than redefining them; consult the tier model for authoritative
-tier boundaries and vocabulary.
+Controller-based mutation that watches Pods, Deployments, Jobs, and StatefulSets.
+When a workload carries the opt-in signals, the controller:
+
+1. Adds a ConfigMap volume mount for remote.yaml
+2. Injects standard environment variables
+3. Creates or reconciles server Deployments from configured server stages
+4. Adds a readiness probe to generated server containers
+5. Does not add hostPath volumes, host namespaces, or privileged contexts
+
+Application and server images must contain the runtime SDK from `runtime/`.
+
+## 📦 Repository Structure
+
+| Path | Content |
+|---|---|
+| `controller/` | Mutation controller (Python) |
+| `helm/gpu-offload/` | Helm chart for control plane |
+| `runtime/` | Xavier remoting SDK with MessagePack transport |
+| `specifications/` | Remote.yaml schema and opt-in contract |
+| `examples/so101-real-hardware/` | SO-101 end-to-end example |
+
+Additional reference documents:
+
+- [XAVIER-PORTING.md](./XAVIER-PORTING.md): porting decisions and deviations
+- [PROVENANCE.md](./PROVENANCE.md): upstream snapshot and licensing
+
+## 📤 Implementation Status
+
+| Feature | Status | Notes |
+|---|---|---|
+| Controller mutation | Implemented | Label-selected admission with annotation configuration |
+| ConfigMap volume mount | Implemented | Read-only, mounted at /xavierconfig |
+| Env var injection | Implemented | REMOTER_CONFIG, downward API fields |
+| Server readiness probe | Implemented | Checks /ready.txt written by the runtime |
+| MessagePack codec | Implemented | Versioned envelope and explicit adapters |
+| Server deployment generation | Implemented | Supports global and per-stage settings |
+| Per-client deployments | Implemented | Reconciled from admitted client Pods |
+
+## ⚠️ Scope
+
+This domain provides the offload contract, controller, runtime SDK, deployment
+scaffolding, and examples. The real-hardware example is reference material; adapt it
+to your hardware and build the SDK into both application and server images.
+
+## 🧩 Tier Model
+
+GPU offloading aligns with T3–T4 deployment topology concerns (single-site Kubernetes
+to multi-site scale). It is NOT a T5 fleet-intelligence capability. See
+[docs/design/tier-model.md](../docs/design/tier-model.md) for authoritative tier
+definitions.
+
+## 🔍 Troubleshooting
+
+### Mutation does not occur
+
+Verify the workload has label `xavier: "true"`, annotation
+`xavierconfig` referencing a valid ConfigMap, and `REMOTERPORT` in its runtime container.
+
+### Server-stage pod fails to start
+
+Check that the server image is available from the configured registry and GPU nodes
+have available capacity.

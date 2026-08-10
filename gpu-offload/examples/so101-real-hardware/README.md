@@ -34,7 +34,7 @@ a separate `hardware_bridge` node owns the motor bus. See
 
 ## 🚀 Run
 
-1. **Install the offload chart.** Deploy the mutating webhook and node agent so opt-in
+1. **Install the offload chart.** Deploy the mutating webhook and controller so opt-in
    workloads are mutated. Point `image.registry` at the registry holding your mirrored
    `xavier-mutate` and `pyremote` images. Full instructions are in the
    [chart README](../../helm/README.md).

@@ -82,7 +82,7 @@ transparently in the stage pod.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| _(map key)_ | string | Yes | Path in `module.path/function` or `module.path/Class/method` form |
+| _(map key)_ | string | Yes | Path in `module.path//function` or `module.path/Class/method` form |
 | `singleinstance` | boolean | No | `true`: object instantiated once and shared; `false`: per-call |
 | `remoteloc` | string | Yes | Target `serverstages` entry `name` |
 
@@ -156,7 +156,7 @@ Implementers should validate:
 1. Each `serverstages[*].name` is unique
 2. Each `remoteloc` references a declared stage `name`
 3. `resources.limits.nvidia.com/gpu` is a positive integer when GPU offloading
-4. Class and function paths follow `module.path/Name` format
+4. Class paths follow `module.path/ClassName`; function paths use `module.path//function` or `module.path/Class/method`
 5. `singleinstance` is only used for functions/methods, not classes
 
 ## Workload Opt-In Contract

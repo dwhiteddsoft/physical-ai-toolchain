@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-offload-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-offload-runtime
+  namespace: gpu-offload-demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gpu-offload-runtime
+  namespace: gpu-offload-demo
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gpu-offload-runtime
+  namespace: gpu-offload-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gpu-offload-runtime
+subjects:
+  - kind: ServiceAccount
+    name: gpu-offload-runtime
+    namespace: gpu-offload-demo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: first-run-offload
+  namespace: gpu-offload-demo
+data:
+  remote.yaml: |
+    serverstages:
+      - name: cpu
+        perclient: false
+        serverimage: gpu-offload-first-run:local
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+    remotefuncs:
+      - "demo_model//predict":
+          remoteloc: cpu
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: first-run-client
+  namespace: gpu-offload-demo
+  labels:
+    app: first-run-client
+    xavier: "true"
+  annotations:
+    xavierconfig: |
+      remoteablecm: first-run-offload
+      remoteableconts:
+        - client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: first-run-client
+  template:
+    metadata:
+      labels:
+        app: first-run-client
+        xavier: "true"
+    spec:
+      serviceAccountName: gpu-offload-runtime
+      containers:
+        - name: client
+          image: gpu-offload-first-run:local
+          imagePullPolicy: Never
+          env:
+            - name: REMOTERPORT
+              value: "30001"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi

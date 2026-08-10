@@ -12,6 +12,7 @@ from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from kubernetes import client, config, watch
@@ -181,6 +182,7 @@ def validate_xavier_config(
     *,
     source: str,
     require_remoteablecm: bool,
+    should_add_default_stage: bool = True,
 ) -> dict[str, Any]:
     normalized = copy.deepcopy(raw_config)
     if require_remoteablecm:
@@ -223,7 +225,8 @@ def validate_xavier_config(
 
     stages = normalized.get("serverstages")
     if stages is None:
-        normalized["serverstages"] = [{"name": "", "perclient": top_level_perclient}]
+        if should_add_default_stage:
+            normalized["serverstages"] = [{"name": "", "perclient": top_level_perclient}]
     else:
         if not isinstance(stages, list):
             raise XavierConfigError(f"{source}.serverstages must be a list")
@@ -234,7 +237,12 @@ def validate_xavier_config(
 def _load_annotation_config(raw_annotation: str, *, strict: bool) -> dict[str, Any] | None:
     try:
         parsed = _safe_yaml_mapping(raw_annotation, source=XAVIER_CONFIG_ANNOTATION)
-        return validate_xavier_config(parsed, source=XAVIER_CONFIG_ANNOTATION, require_remoteablecm=True)
+        return validate_xavier_config(
+            parsed,
+            source=XAVIER_CONFIG_ANNOTATION,
+            require_remoteablecm=True,
+            should_add_default_stage=False,
+        )
     except XavierConfigError:
         if strict:
             raise
@@ -881,13 +889,13 @@ class AdmissionHTTPRequestHandler(BaseHTTPRequestHandler):
     server_version = "gpu-offload-controller/1.0"
 
     def do_GET(self) -> None:
-        if self.path not in {"/healthz", "/readyz"}:
+        if urlsplit(self.path).path not in {"/healthz", "/readyz"}:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         self._send_json(HTTPStatus.OK, {"status": "ok"})
 
     def do_POST(self) -> None:
-        if self.path != "/mutate":
+        if urlsplit(self.path).path != "/mutate":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         try:

@@ -188,7 +188,8 @@ def start(serveronly=True):
         locconfigfile = os.path.abspath(os.path.join(dir, locconfigfile))
     logger.info(f"Location Config file: {locconfigfile} -- Remote Task config file: {remoteconfig}")
     if cfg.get('configfromkube', False) or os.environ.get('CONFIGFROMKUBE', 'false').lower() == 'true':
-        locconfigfile = os.path.abspath(os.path.join(os.path.dirname(remoteconfig), "rmtconfigkube.yaml")) # override locconfigfile
+        # Generated state must be outside the read-only ConfigMap mount.
+        locconfigfile = "/tmp/rmtconfigkube.yaml"
         # now also initialize rmtconfigkube
         remoter.Remoter.waituntillocation = True
         if ':' in os.environ.get('WRITE_READY_MESSAGE', ''):

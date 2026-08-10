@@ -21,6 +21,8 @@ is opt-in through workload label and annotation.
 
 ## 🚀 Quick Start (cluster)
 
+For a zero-to-running CPU walkthrough, start with [docs/README.md](./docs/README.md).
+
 1. Install the control plane:
 
    ```bash

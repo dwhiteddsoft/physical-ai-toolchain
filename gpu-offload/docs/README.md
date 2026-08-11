@@ -10,7 +10,7 @@ Build the GPU-offload components with rootless Podman and run a complete remote 
 ## 🚀 Start Here
 
 1. [Set up Podman and kind](./01-local-kubernetes-setup.md).
-2. Select [Podman kind CPU Only](./02-first-cpu-offload.md#podman-kind-cpu-only) or [Podman kind NVIDIA on WSL2](./02-first-cpu-offload.md#podman-kind-nvidia-on-wsl2).
+2. Select [Podman kind CPU Only](./02-first-local-offload.md#podman-kind-cpu-only) or [Podman kind NVIDIA on WSL2](./02-first-local-offload.md#podman-kind-nvidia-on-wsl2).
 
 Both paths validate Podman image building, admission mutation, server-stage creation, peer discovery, transport, and remote execution. The NVIDIA path also verifies Podman CDI, Kubernetes GPU capacity, `/dev/dxg` allocation to the generated server, and execution from that server pod.
 

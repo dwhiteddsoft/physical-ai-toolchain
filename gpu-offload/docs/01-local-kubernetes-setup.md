@@ -7,7 +7,7 @@ ms.topic: get-started
 
 <!-- cspell:ignore crun -->
 
-Prepare a rootless Podman-backed kind cluster for the first GPU-offload run. Use the CPU path on any Linux host or the NVIDIA path in WSL2 with a GPU exposed through `/dev/dxg`.
+Prepare a rootless Podman-backed kind cluster for the first GPU-offload run. Use the CPU path on any Linux host or the NVIDIA path in WSL2 with a GPU exposed through `/dev/dxg`. Reference numbers correspond to optional local automation while every command remains standalone.
 
 ## Clone the Repository
 
@@ -36,6 +36,8 @@ git rev-parse --show-toplevel
 | Helm                     | 3.21.3                          | `helm version`         |
 | NVIDIA Container Toolkit | 1.19.1 or later for NVIDIA only | `nvidia-ctk --version` |
 
+### Ref 01: Install Host Packages
+
 Install the base host packages:
 
 ```bash
@@ -44,7 +46,11 @@ sudo apt-get install --yes curl jq podman
 podman info --format '{{.Host.Security.Rootless}} {{.Host.OCIRuntime.Name}}'
 ```
 
-The final command must print `true crun`. Install kind, kubectl, and Helm with mise when they are not already available:
+The final command must print `true crun`.
+
+### Ref 02: Install Kubernetes Tools
+
+Install kind, kubectl, and Helm with mise when they are not already available:
 
 ```bash
 mise use --global kind@0.30.0 kubectl@1.35.1 helm@3.21.3
@@ -54,15 +60,23 @@ kubectl version --client
 helm version
 ```
 
-Render the controller chart before creating a cluster:
+### Ref 10: Validate Prerequisites
+
+Verify the installed tools and render the controller chart before creating a cluster:
 
 ```bash
+podman info --format '{{.Host.Security.Rootless}} {{.Host.OCIRuntime.Name}}'
+kind version
+kubectl version --client
+helm version
 helm template gpu-offload gpu-offload/helm/gpu-offload \
   --namespace gpu-offload \
   --set image.registry=localhost >/dev/null
 ```
 
 ## Podman kind CPU Only
+
+### Ref 20: Set Up the CPU Cluster
 
 Create a single-node cluster without NVIDIA configuration:
 
@@ -81,6 +95,8 @@ kubectl wait \
 kubectl get nodes -o wide
 ```
 
+### Ref 21: Run the CPU Check
+
 Confirm that Podman and Kubernetes run CPU workloads:
 
 ```bash
@@ -98,7 +114,7 @@ kubectl logs pod/cpu-check
 kubectl delete pod/cpu-check
 ```
 
-Continue to the [CPU-only offload](./02-first-cpu-offload.md#podman-kind-cpu-only).
+Continue to the [CPU-only offload](./02-first-local-offload.md#podman-kind-cpu-only).
 
 ## Podman kind NVIDIA on WSL2
 
@@ -107,7 +123,7 @@ Use this path on WSL2 when the Windows NVIDIA driver exposes `/dev/dxg`. Do not 
 > [!IMPORTANT]
 > The WSL2 path uses a generic Kubernetes device plugin for `/dev/dxg`. NVIDIA's standard device plugin requires NVML behavior that is not available in this nested WSL2 and kind topology.
 
-### Install NVIDIA Container Toolkit
+### Ref 30: Install NVIDIA Container Toolkit
 
 Install NVIDIA Container Toolkit from NVIDIA's apt repository:
 
@@ -129,7 +145,7 @@ nvidia-ctk cdi list
 
 The CDI list must include `nvidia.com/gpu=all`.
 
-### Verify Podman GPU Access
+### Ref 31: Verify Podman GPU Access
 
 Verify WSL and rootless Podman before creating Kubernetes:
 
@@ -146,7 +162,7 @@ podman run --rm \
 
 Both `nvidia-smi` commands must list the same adapter.
 
-### Create the NVIDIA kind Cluster
+### Ref 32: Set Up the NVIDIA kind Cluster
 
 Create the kind node with the WSL device and driver directory mounted into it:
 
@@ -167,42 +183,45 @@ nodes:
 EOF
 
 kind create cluster \
-  --name gpu-offload \
+  --name gpu-offload-nvidia \
   --image kindest/node:v1.35.0 \
   --config=/tmp/gpu-offload-kind.yaml
 
-kubectl config use-context kind-gpu-offload
+kubectl config use-context kind-gpu-offload-nvidia
 kubectl wait \
   --for=condition=Ready \
-  node/gpu-offload-control-plane \
+  node/gpu-offload-nvidia-control-plane \
   --timeout=120s
 ```
+
+### Ref 33: Verify NVIDIA Node Access
 
 Confirm GPU access inside the kind node:
 
 ```bash
-podman exec gpu-offload-control-plane sh -c \
+podman exec gpu-offload-nvidia-control-plane sh -c \
   'driver_dir=$(find /usr/lib/wsl/drivers -mindepth 1 -maxdepth 1 -type d | head -n 1); LD_LIBRARY_PATH="/usr/lib/wsl/lib:${driver_dir}" /usr/lib/wsl/lib/nvidia-smi'
 ```
 
-### Configure the Node Runtime
+### Ref 34: Configure the Node Runtime
 
 Add the WSL driver directory to kind's existing OCI base specification. Containerd reads this file at startup, so restart it after the update:
 
 ```bash
-podman exec gpu-offload-control-plane sh -c \
+podman exec gpu-offload-nvidia-control-plane sh -c \
   'jq '\''if any(.mounts[]; .destination == "/usr/lib/wsl") then . else .mounts += [{"destination":"/usr/lib/wsl","type":"none","source":"/usr/lib/wsl","options":["rbind","ro","nosuid","nodev"]}] end'\'' /etc/containerd/cri-base.json > /etc/containerd/cri-base.json.new && mv /etc/containerd/cri-base.json.new /etc/containerd/cri-base.json'
 
-podman exec gpu-offload-control-plane systemctl restart containerd
+podman exec gpu-offload-nvidia-control-plane systemctl restart containerd
 kubectl wait \
+  --context kind-gpu-offload-nvidia \
   --for=condition=Ready \
-  node/gpu-offload-control-plane \
+  node/gpu-offload-nvidia-control-plane \
   --timeout=180s
 ```
 
 This local runtime configuration makes the read-only WSL driver tree available to every container in the kind node. Do not use it as a production Kubernetes configuration.
 
-### Register the WSL GPU
+### Ref 35: Register the WSL GPU
 
 Load the pinned generic device plugin image into kind:
 
@@ -214,13 +233,13 @@ podman save \
 
 kind load image-archive \
   /tmp/generic-device-plugin-0.2.0.tar \
-  --name gpu-offload
+  --name gpu-offload-nvidia
 ```
 
 Register `/dev/dxg` as one `nvidia.com/gpu` resource:
 
 ```bash
-kubectl apply -f - <<'EOF'
+kubectl --context kind-gpu-offload-nvidia apply -f - <<'EOF'
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -262,17 +281,17 @@ spec:
             type: CharDevice
 EOF
 
-kubectl rollout status daemonset/wsl-gpu-device-plugin \
+kubectl --context kind-gpu-offload-nvidia rollout status daemonset/wsl-gpu-device-plugin \
   --namespace kube-system \
   --timeout=120s
 
-kubectl get nodes \
+kubectl --context kind-gpu-offload-nvidia get nodes \
   -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
 ```
 
 Wait for the `GPU` column to report `1` before continuing.
 
-### Verify Kubernetes GPU Access
+### Ref 36: Verify Kubernetes GPU Access
 
 Load the CUDA image into kind and run a pod that requests the registered resource:
 
@@ -284,9 +303,9 @@ podman save \
 
 kind load image-archive \
   /tmp/nvidia-cuda-12.8.1.tar \
-  --name gpu-offload
+  --name gpu-offload-nvidia
 
-kubectl apply -f - <<'EOF'
+kubectl --context kind-gpu-offload-nvidia apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
 metadata:
@@ -309,14 +328,51 @@ spec:
           nvidia.com/gpu: "1"
 EOF
 
-kubectl wait pod/wsl-gpu-check \
+kubectl --context kind-gpu-offload-nvidia wait pod/wsl-gpu-check \
   --for=jsonpath='{.status.phase}'=Succeeded \
   --timeout=120s
-kubectl logs pod/wsl-gpu-check
-kubectl delete pod/wsl-gpu-check
+kubectl --context kind-gpu-offload-nvidia logs pod/wsl-gpu-check
+kubectl --context kind-gpu-offload-nvidia delete pod/wsl-gpu-check
 ```
 
-The log must list the NVIDIA adapter. Continue to the [NVIDIA offload](./02-first-cpu-offload.md#podman-kind-nvidia-on-wsl2).
+The log must list the NVIDIA adapter. Continue to the [NVIDIA offload](./02-first-local-offload.md#podman-kind-nvidia-on-wsl2).
+
+## Manage Existing Clusters
+
+### Ref 00: List Clusters
+
+List the Podman-backed kind clusters and their node containers:
+
+```bash
+export KIND_EXPERIMENTAL_PROVIDER=podman
+kind get clusters
+podman ps --all --filter label=io.x-k8s.kind.cluster
+```
+
+### Refs 70-71: Start a Cluster
+
+Start a stopped cluster and wait for its node:
+
+```bash
+cluster_name=gpu-offload
+podman start "${cluster_name}-control-plane"
+kubectl config use-context "kind-${cluster_name}"
+kubectl wait \
+  --for=condition=Ready \
+  "node/${cluster_name}-control-plane" \
+  --timeout=120s
+```
+
+Use `gpu-offload` for the CPU cluster or `gpu-offload-nvidia` for the WSL2 NVIDIA cluster.
+
+### Refs 80-81: Stop a Cluster
+
+Stop a cluster without deleting its state:
+
+```bash
+cluster_name=gpu-offload
+podman stop "${cluster_name}-control-plane"
+```
 
 ## Troubleshooting
 
@@ -342,9 +398,9 @@ nvidia-ctk cdi list
 Inspect the generic device plugin and the node resource state:
 
 ```bash
-kubectl logs daemonset/wsl-gpu-device-plugin --namespace kube-system
-kubectl describe node gpu-offload-control-plane
-podman exec gpu-offload-control-plane ls -l /dev/dxg
+kubectl --context kind-gpu-offload-nvidia logs daemonset/wsl-gpu-device-plugin --namespace kube-system
+kubectl --context kind-gpu-offload-nvidia describe node gpu-offload-nvidia-control-plane
+podman exec gpu-offload-nvidia-control-plane ls -l /dev/dxg
 ```
 
 The plugin log must show registration for `nvidia.com/gpu`, and `/dev/dxg` must exist in the node.
@@ -354,23 +410,38 @@ The plugin log must show registration for `nvidia.com/gpu`, and `/dev/dxg` must 
 Confirm that the OCI base spec contains the read-only mount, then restart containerd:
 
 ```bash
-podman exec gpu-offload-control-plane \
+podman exec gpu-offload-nvidia-control-plane \
   jq '.mounts[] | select(.destination == "/usr/lib/wsl")' \
   /etc/containerd/cri-base.json
 
-podman exec gpu-offload-control-plane systemctl restart containerd
+podman exec gpu-offload-nvidia-control-plane systemctl restart containerd
 kubectl wait \
+  --context kind-gpu-offload-nvidia \
   --for=condition=Ready \
-  node/gpu-offload-control-plane \
+  node/gpu-offload-nvidia-control-plane \
   --timeout=180s
 ```
 
 ## Cleanup
 
-Delete the selected local cluster:
+### Ref 90: Tear Down the CPU Cluster
+
+Delete the CPU cluster:
 
 ```bash
 export KIND_EXPERIMENTAL_PROVIDER=podman
 kind delete cluster --name gpu-offload
-rm -f /tmp/gpu-offload-kind.yaml
+```
+
+### Ref 91: Tear Down the NVIDIA Cluster
+
+Delete the WSL2 NVIDIA cluster and its temporary kind configuration:
+
+```bash
+export KIND_EXPERIMENTAL_PROVIDER=podman
+kind delete cluster --name gpu-offload-nvidia
+rm -f \
+  /tmp/gpu-offload-kind.yaml \
+  /tmp/generic-device-plugin-0.2.0.tar \
+  /tmp/nvidia-cuda-12.8.1.tar
 ```

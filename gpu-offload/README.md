@@ -1,7 +1,7 @@
 ---
 title: GPU Offload (Xavier) Integration
 description: Transparent GPU offloading for robot inference
-ms.date: 2026-08-10
+ms.date: 2026-08-11
 ms.topic: overview
 ---
 
@@ -11,17 +11,18 @@ is opt-in through workload label and annotation.
 
 ## 📋 Prerequisites
 
-| Requirement | Minimum |
-|---|---|
-| Kubernetes cluster | GPU nodes with NVIDIA device plugin |
-| Container images | `xavier-mutate` and `pyremote` in accessible registry |
-| Tools | Helm 3 and `kubectl` configured |
-| Python (controller tests) | 3.12 |
-| Podman (local development) | Latest stable |
+| Requirement                | Minimum                                               |
+|----------------------------|-------------------------------------------------------|
+| Kubernetes cluster         | CPU nodes, or GPU nodes with NVIDIA device plugin     |
+| Container images           | `xavier-mutate` and `pyremote` in accessible registry |
+| Tools                      | Helm 3 and `kubectl` configured                       |
+| Python (controller tests)  | 3.12                                                  |
+| Podman (local development) | 4.9.3 or later                                        |
+| kind (local Kubernetes)    | 0.30.0                                                |
 
-## 🚀 Quick Start (cluster)
+## 🚀 Quick Start
 
-For a zero-to-running CPU walkthrough, start with [docs/README.md](./docs/README.md).
+For a zero-to-verification Podman and kind walkthrough, start with [docs/README.md](./docs/README.md). The guide contains CPU-only and WSL2 NVIDIA paths built on the same first-run example.
 
 1. Install the control plane:
 
@@ -40,11 +41,11 @@ For a zero-to-running CPU walkthrough, start with [docs/README.md](./docs/README
 
 Workload opt-in requires three signals:
 
-| Signal | Location | Value | Purpose |
-|---|---|---|---|
-| Label `xavier` | Pod metadata | `"true"` | Select for mutation |
-| Annotation `xavierconfig` | Workload metadata | ConfigMap name | Reference remote.yaml |
-| Env `REMOTERPORT` | Main container | Port (e.g. 30001) | Server endpoint |
+| Signal                    | Location          | Value             | Purpose               |
+|---------------------------|-------------------|-------------------|-----------------------|
+| Label `xavier`            | Pod metadata      | `"true"`          | Select for mutation   |
+| Annotation `xavierconfig` | Workload metadata | ConfigMap name    | Reference remote.yaml |
+| Env `REMOTERPORT`         | Main container    | Port (e.g. 30001) | Server endpoint       |
 
 The `xavierconfig` annotation points to a ConfigMap containing `remote.yaml`. See
 [specifications/remote-spec-schema.md](./specifications/remote-spec-schema.md) for
@@ -65,13 +66,13 @@ Application and server images must contain the runtime SDK from `runtime/`.
 
 ## 📦 Repository Structure
 
-| Path | Content |
-|---|---|
-| `controller/` | Mutation controller (Python) |
-| `helm/gpu-offload/` | Helm chart for control plane |
-| `runtime/` | Xavier remoting SDK with MessagePack transport |
-| `specifications/` | Remote.yaml schema and opt-in contract |
-| `examples/so101-real-hardware/` | SO-101 end-to-end example |
+| Path                            | Content                                        |
+|---------------------------------|------------------------------------------------|
+| `controller/`                   | Mutation controller (Python)                   |
+| `helm/gpu-offload/`             | Helm chart for control plane                   |
+| `runtime/`                      | Xavier remoting SDK with MessagePack transport |
+| `specifications/`               | Remote.yaml schema and opt-in contract         |
+| `examples/so101-real-hardware/` | SO-101 end-to-end example                      |
 
 Additional reference documents:
 
@@ -80,15 +81,15 @@ Additional reference documents:
 
 ## 📤 Implementation Status
 
-| Feature | Status | Notes |
-|---|---|---|
-| Controller mutation | Implemented | Label-selected admission with annotation configuration |
-| ConfigMap volume mount | Implemented | Read-only, mounted at /xavierconfig |
-| Env var injection | Implemented | REMOTER_CONFIG, downward API fields |
-| Server readiness probe | Implemented | Checks /ready.txt written by the runtime |
-| MessagePack codec | Implemented | Versioned envelope and explicit adapters |
-| Server deployment generation | Implemented | Supports global and per-stage settings |
-| Per-client deployments | Implemented | Reconciled from admitted client Pods |
+| Feature                      | Status      | Notes                                                  |
+|------------------------------|-------------|--------------------------------------------------------|
+| Controller mutation          | Implemented | Label-selected admission with annotation configuration |
+| ConfigMap volume mount       | Implemented | Read-only, mounted at /xavierconfig                    |
+| Env var injection            | Implemented | REMOTER_CONFIG, downward API fields                    |
+| Server readiness probe       | Implemented | Checks /ready.txt written by the runtime               |
+| MessagePack codec            | Implemented | Versioned envelope and explicit adapters               |
+| Server deployment generation | Implemented | Supports global and per-stage settings                 |
+| Per-client deployments       | Implemented | Reconciled from admitted client Pods                   |
 
 ## ⚠️ Scope
 

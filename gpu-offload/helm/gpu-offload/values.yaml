@@ -24,11 +24,11 @@ imagePullSecrets: []
 mutate:
   image:
     # -- Real image name consumed from `image.registry`.
-    repository: ghcr.io/sanjeevm0/xavier-controller
+    repository: ""
     # -- Leave `tag` empty and set `digest` to a sha256 pin for reproducible,
     # tamper-evident deploys (recommended). When `digest` is set it wins over `tag`.
     # Example: digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    tag: "latest"
+    tag: ""
     digest: ""
   # -- TLS port the webhook Service and admission endpoint listen on.
   webhookPort: 6443

@@ -14,6 +14,7 @@ from typing import Any
 
 TYPE_KEY = "__type__"
 VALUE_KEY = "__value__"
+TENSOR_KEY = "__tensor__"
 
 _PRIMITIVES = (str, int, float, bool, type(None))
 _NAME_TO_TYPE: dict[str, type[Any]] = {}
@@ -64,10 +65,77 @@ def _resolve(path: str) -> type:
     return obj
 
 
+def _get_torch() -> Any | None:
+    try:
+        return importlib.import_module("torch")
+    except ModuleNotFoundError:
+        return None
+
+
+def _is_torch_tensor_type(cls: type[Any]) -> bool:
+    return any(base.__module__ == "torch" and base.__name__ == "Tensor" for base in cls.__mro__)
+
+
+def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
+    if not _is_torch_tensor_type(type(obj)):
+        return None
+    torch = _get_torch()
+    if torch is None or not isinstance(obj, torch.Tensor):
+        return None
+    if obj.layout != torch.strided:
+        raise TypeError(f"Cannot serialize tensor with layout {obj.layout}; register an explicit adapter")
+
+    contiguous = obj.detach().cpu().contiguous().reshape(-1).clone()
+    data = bytes(contiguous.untyped_storage()) if contiguous.numel() else b""
+    return {
+        TYPE_KEY: _qualname(type(obj)),
+        TENSOR_KEY: {
+            "data": data,
+            "device": str(obj.device),
+            "dtype": str(obj.dtype).removeprefix("torch."),
+            "requires_grad": obj.requires_grad,
+            "shape": list(obj.shape),
+        },
+    }
+
+
+def _tensor_from_dict(target: type[Any], payload: Any) -> Any:
+    torch = _get_torch()
+    if torch is None or not issubclass(target, torch.Tensor):
+        raise TypeError(f"Cannot reconstruct tensor type {target!r}: PyTorch is not installed")
+    if not isinstance(payload, dict):
+        raise TypeError("Tensor payload must be a mapping")
+
+    dtype_name = payload.get("dtype")
+    dtype = getattr(torch, dtype_name, None) if isinstance(dtype_name, str) else None
+    if not isinstance(dtype, torch.dtype):
+        raise TypeError(f"Tensor payload has unsupported dtype {dtype_name!r}")
+
+    shape = payload.get("shape")
+    if not isinstance(shape, list) or not all(isinstance(size, int) and size >= 0 for size in shape):
+        raise TypeError("Tensor payload shape must be a list of non-negative integers")
+    data = payload.get("data")
+    if not isinstance(data, bytes):
+        raise TypeError("Tensor payload data must be bytes")
+
+    if data:
+        tensor = torch.frombuffer(bytearray(data), dtype=dtype).clone().reshape(shape)
+    else:
+        tensor = torch.empty(shape, dtype=dtype)
+    tensor = tensor.to(payload.get("device", "cpu"))
+    tensor.requires_grad_(bool(payload.get("requires_grad", False)))
+    if target is torch.Tensor:
+        return tensor
+    return tensor.as_subclass(target)
+
+
 def to_dict(obj: Any) -> Any:
     """Recursively convert ``obj`` into JSON friendly primitives."""
     if isinstance(obj, _PRIMITIVES):
         return obj
+    tensor_data = _tensor_to_dict(obj)
+    if tensor_data is not None:
+        return tensor_data
     if isinstance(obj, enum.Enum):
         return {TYPE_KEY: _qualname(type(obj)), VALUE_KEY: obj.value}
     if isinstance(obj, (datetime, date)):
@@ -85,11 +153,7 @@ def to_dict(obj: Any) -> Any:
     elif hasattr(obj, "__dict__"):
         data = {k: to_dict(v) for k, v in vars(obj).items()}
     elif hasattr(obj, "__slots__"):
-        data = {
-            name: to_dict(getattr(obj, name))
-            for name in obj.__slots__
-            if hasattr(obj, name)
-        }
+        data = {name: to_dict(getattr(obj, name)) for name in obj.__slots__ if hasattr(obj, name)}
     else:
         raise TypeError(f"Cannot serialize object of type {type(obj)!r}")
 
@@ -110,6 +174,9 @@ def from_dict(data: Any, cls: type | None = None) -> Any:
         return {key: from_dict(value) for key, value in data.items()}
 
     target = cls if cls is not None else _resolve(data[TYPE_KEY])
+
+    if TENSOR_KEY in data:
+        return _tensor_from_dict(target, data[TENSOR_KEY])
 
     if VALUE_KEY in data:
         value = data[VALUE_KEY]
@@ -132,4 +199,4 @@ def from_dict(data: Any, cls: type | None = None) -> Any:
         return instance
 
 
-__all__ = ["to_dict", "from_dict", "register_type", "TYPE_KEY", "VALUE_KEY"]
+__all__ = ["TENSOR_KEY", "TYPE_KEY", "VALUE_KEY", "from_dict", "register_type", "to_dict"]

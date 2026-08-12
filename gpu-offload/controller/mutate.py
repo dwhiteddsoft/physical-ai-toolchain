@@ -92,7 +92,9 @@ def _validate_string_map(value: Any, *, field: str) -> dict[str, str]:
         raise XavierConfigError(f"{field} must be a mapping")
     normalized: dict[str, str] = {}
     for key, item in value.items():
-        normalized[str(_validate_string(key, field=f"{field} key"))] = str(_validate_string(item, field=f"{field}[{key!r}]"))
+        normalized[str(_validate_string(key, field=f"{field} key"))] = str(
+            _validate_string(item, field=f"{field}[{key!r}]")
+        )
     return normalized
 
 
@@ -596,6 +598,8 @@ def create_server_deployment_spec(
     copy_allowed_volumes_and_mounts(deployment["spec"]["template"]["spec"], spec, xavier_container)
 
     container = deployment["spec"]["template"]["spec"]["containers"][0]
+    if "imagePullPolicy" in xavier_container:
+        container["imagePullPolicy"] = xavier_container["imagePullPolicy"]
     env_dict = env_vars_to_dict(xavier_container)
     env_dict.update(_merge_env_lists(xavierconfig.get("env"), getparam(xavierconfig, stage, "env")))
     env_dict.update(
@@ -792,11 +796,13 @@ def create_json_patch(source: Any, target: Any, path: str = "") -> list[dict[str
         for key in sorted(source_keys - target_keys):
             patch.append({"op": "remove", "path": f"{path}/{_json_pointer_escape(key)}"})
         for key in sorted(target_keys - source_keys):
-            patch.append({
-                "op": "add",
-                "path": f"{path}/{_json_pointer_escape(key)}",
-                "value": copy.deepcopy(target[key]),
-            })
+            patch.append(
+                {
+                    "op": "add",
+                    "path": f"{path}/{_json_pointer_escape(key)}",
+                    "value": copy.deepcopy(target[key]),
+                }
+            )
         for key in sorted(source_keys & target_keys):
             patch.extend(create_json_patch(source[key], target[key], f"{path}/{_json_pointer_escape(key)}"))
         return patch
@@ -856,7 +862,9 @@ class XavierAdmissionController:
         operation = request.get("operation")
         obj = request.get("object")
         if not isinstance(obj, dict):
-            return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message="AdmissionReview.request.object must be a JSON object")
+            return HTTPStatus.OK, admission_response(
+                uid=uid, allowed=False, status_message="AdmissionReview.request.object must be a JSON object"
+            )
         if operation not in SUPPORTED_OPERATIONS:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=True)
 
@@ -876,7 +884,9 @@ class XavierAdmissionController:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message=str(exc))
         except Exception as exc:  # pragma: no cover - defensive path
             logger.exception("Unhandled mutation failure")
-            return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message=f"Unhandled mutation failure: {exc}")
+            return HTTPStatus.OK, admission_response(
+                uid=uid, allowed=False, status_message=f"Unhandled mutation failure: {exc}"
+            )
 
         if not changed:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=True)
@@ -950,7 +960,9 @@ def build_ssl_context(cert_file: str, key_file: str) -> ssl.SSLContext:
     return context
 
 
-def load_kubernetes_clients(kubeconfig_path: str | None) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api]:
+def load_kubernetes_clients(
+    kubeconfig_path: str | None,
+) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api]:
     if kubeconfig_path:
         config.load_kube_config(config_file=kubeconfig_path)
     else:
@@ -1018,7 +1030,9 @@ class ReconcileRuntime:
         try:
             self.controller.reconcile_object(obj)
         except XavierConfigError as exc:
-            logger.warning("Skipping reconcile for %s/%s: %s", obj.get("kind"), obj.get("metadata", {}).get("name"), exc)
+            logger.warning(
+                "Skipping reconcile for %s/%s: %s", obj.get("kind"), obj.get("metadata", {}).get("name"), exc
+            )
         except client.exceptions.ApiException as exc:
             logger.warning(
                 "Kubernetes API error while reconciling %s/%s: %s",
@@ -1035,12 +1049,16 @@ def main() -> None:
     parser.add_argument("--cert-file", default=DEFAULT_TLS_CERT_PATH, help="TLS certificate path")
     parser.add_argument("--key-file", default=DEFAULT_TLS_KEY_PATH, help="TLS private key path")
     parser.add_argument("--kubeconfig", default=None, help="Optional kubeconfig path for out-of-cluster use")
-    parser.add_argument("--disable-reconcile", action="store_true", help="Run admission only without background reconciliation")
+    parser.add_argument(
+        "--disable-reconcile", action="store_true", help="Run admission only without background reconciliation"
+    )
     parser.add_argument("--disable-tls", action="store_true", help="Disable TLS for local debugging only")
     parser.add_argument("--log-level", default="INFO", help="Python logging level")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     core_api = apps_api = batch_api = None
     runtime: ReconcileRuntime | None = None
@@ -1070,10 +1088,10 @@ def main() -> None:
 
 
 __all__ = [
-    "AdmissionHTTPServer",
-    "DoMutate",
     "READINESS_PROBE",
     "REMOTE_CONFIG_PATH",
+    "AdmissionHTTPServer",
+    "DoMutate",
     "XavierAdmissionController",
     "XavierConfigError",
     "admission_response",

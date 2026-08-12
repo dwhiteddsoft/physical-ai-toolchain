@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import msgpack
 
@@ -53,6 +54,7 @@ class AdapterRegistry:
     def __init__(self) -> None:
         self._code_to_adapter: dict[int, TypeAdapter] = {}
         self._type_to_adapter: dict[type[Any], TypeAdapter] = {}
+        self._fallback_adapter: TypeAdapter | None = None
 
     def register(self, adapter: TypeAdapter) -> None:
         if adapter.ext_code in _RESERVED_EXT_CODES:
@@ -66,6 +68,18 @@ class AdapterRegistry:
         self._code_to_adapter[adapter.ext_code] = adapter
         self._type_to_adapter[adapter.py_type] = adapter
 
+    def register_fallback(self, adapter: TypeAdapter) -> None:
+        if self._fallback_adapter is not None:
+            raise ValueError("fallback adapter already registered")
+        if adapter.ext_code in _RESERVED_EXT_CODES:
+            raise ValueError(f"ext_code {adapter.ext_code} is reserved")
+        if not 16 <= adapter.ext_code <= 127:
+            raise ValueError("ext_code must be in range 16..127")
+        if adapter.ext_code in self._code_to_adapter:
+            raise ValueError(f"ext_code {adapter.ext_code} already registered")
+        self._code_to_adapter[adapter.ext_code] = adapter
+        self._fallback_adapter = adapter
+
     def find_by_type(self, value: Any) -> TypeAdapter | None:
         # First hit exact type registrations; then fallback to isinstance matching.
         adapter = self._type_to_adapter.get(type(value))
@@ -78,6 +92,9 @@ class AdapterRegistry:
 
     def find_by_code(self, code: int) -> TypeAdapter | None:
         return self._code_to_adapter.get(code)
+
+    def find_fallback(self) -> TypeAdapter | None:
+        return self._fallback_adapter
 
 
 _VERSION = 1
@@ -97,9 +114,7 @@ def dumps(
     packet = {"v": _VERSION, "p": payload}
     encoded = msgpack.packb(packet, use_bin_type=True, strict_types=True)
     if len(encoded) > limits.max_encoded_bytes:
-        raise CodecLimitsError(
-            f"encoded bytes {len(encoded)} exceed max_encoded_bytes={limits.max_encoded_bytes}"
-        )
+        raise CodecLimitsError(f"encoded bytes {len(encoded)} exceed max_encoded_bytes={limits.max_encoded_bytes}")
     return encoded
 
 
@@ -111,9 +126,7 @@ def loads(
     context: AdapterContext,
 ) -> Any:
     if len(data) > limits.max_encoded_bytes:
-        raise CodecLimitsError(
-            f"encoded bytes {len(data)} exceed max_encoded_bytes={limits.max_encoded_bytes}"
-        )
+        raise CodecLimitsError(f"encoded bytes {len(data)} exceed max_encoded_bytes={limits.max_encoded_bytes}")
 
     def _ext_hook(code: int, ext_data: bytes) -> _ExtEnvelope:
         return _ExtEnvelope(code=code, data=ext_data)
@@ -148,15 +161,11 @@ def _encode_value(
         return value
     if isinstance(value, str):
         if len(value) > limits.max_str_length:
-            raise CodecLimitsError(
-                f"string length {len(value)} exceeds max_str_length={limits.max_str_length}"
-            )
+            raise CodecLimitsError(f"string length {len(value)} exceeds max_str_length={limits.max_str_length}")
         return value
     if isinstance(value, bytes):
         if len(value) > limits.max_bytes_length:
-            raise CodecLimitsError(
-                f"bytes length {len(value)} exceeds max_bytes_length={limits.max_bytes_length}"
-            )
+            raise CodecLimitsError(f"bytes length {len(value)} exceeds max_bytes_length={limits.max_bytes_length}")
         return value
     if isinstance(value, uuid.UUID):
         return msgpack.ExtType(_RESERVED_EXT_UUID, value.bytes)
@@ -191,7 +200,9 @@ def _encode_value(
 
     adapter = registry.find_by_type(value)
     if adapter is None:
-        raise CodecTypeError(f"unsupported type {type(value)!r}; register an explicit adapter")
+        adapter = registry.find_fallback()
+        if adapter is None:
+            raise CodecTypeError(f"unsupported type {type(value)!r}; register an explicit adapter")
 
     payload = adapter.encode(value, context)
     encoded_payload = _encode_value(payload, depth + 1, registry, limits, context)
@@ -213,13 +224,9 @@ def _decode_value(
 
     if value is None or isinstance(value, (bool, int, float, str, bytes)):
         if isinstance(value, str) and len(value) > limits.max_str_length:
-            raise CodecLimitsError(
-                f"string length {len(value)} exceeds max_str_length={limits.max_str_length}"
-            )
+            raise CodecLimitsError(f"string length {len(value)} exceeds max_str_length={limits.max_str_length}")
         if isinstance(value, bytes) and len(value) > limits.max_bytes_length:
-            raise CodecLimitsError(
-                f"bytes length {len(value)} exceeds max_bytes_length={limits.max_bytes_length}"
-            )
+            raise CodecLimitsError(f"bytes length {len(value)} exceeds max_bytes_length={limits.max_bytes_length}")
         return value
 
     if isinstance(value, list):

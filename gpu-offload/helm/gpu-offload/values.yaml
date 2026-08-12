@@ -9,7 +9,7 @@ image:
   # or set to your registry (e.g. ghcr.io/my-org, docker.io/my-org).
   registry: ""
   # Applied to every container in this chart.
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # -- References to registry pull secrets. Leave empty and prefer workload identity
 # (AKS: federated credentials on a managed identity + AcrPull role assignment) so no

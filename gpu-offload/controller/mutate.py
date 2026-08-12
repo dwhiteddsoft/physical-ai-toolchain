@@ -505,7 +505,7 @@ def copy_allowed_volumes_and_mounts(
     existing_mount_names = {mount.get("name") for mount in destination_mounts}
     for mount in from_container.get("volumeMounts", []) or []:
         mount_name = mount.get("name")
-        if mount_name not in mount_names or mount_name in existing_mount_names:
+        if mount_name not in existing_volume_names or mount_name in existing_mount_names:
             continue
         destination_mounts.append(copy.deepcopy(mount))
         existing_mount_names.add(mount_name)

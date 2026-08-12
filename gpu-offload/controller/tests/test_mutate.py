@@ -409,6 +409,15 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
     assert {'KEEP_ME', 'ANNOTATION_ENV', 'GLOBAL_ENV', 'SERVER', 'DEPLOYMENT_NAME', 'REMOTER_CONFIG'} <= env_names
     assert any(env['name'] == 'FROM_FIELD' and 'valueFrom' in env for env in default_deployment['spec']['template']['spec']['containers'][0]['env'])
     assert all('hostPath' not in volume for volume in default_deployment['spec']['template']['spec'].get('volumes', []))
+    copied_volume_names = {
+        volume['name'] for volume in default_deployment['spec']['template']['spec'].get('volumes', [])
+    }
+    copied_mount_names = {
+        mount['name']
+        for mount in default_deployment['spec']['template']['spec']['containers'][0].get('volumeMounts', [])
+    }
+    assert copied_mount_names == {'xavierconfig'}
+    assert copied_mount_names <= copied_volume_names
     assert stage_deployment['spec']['replicas'] == 3
     assert stage_deployment['spec']['template']['spec']['nodeSelector'] == {'tier': 'edge'}
     assert stage_deployment['spec']['template']['spec']['containers'][0]['image'] == 'registry/perclient:2'

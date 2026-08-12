@@ -22,3 +22,10 @@ Both paths validate Podman image building, admission mutation, server-stage crea
 | Podman kind NVIDIA on WSL2 | NVIDIA GPU exposed to WSL2 through `/dev/dxg` | Remote execution in a server-stage pod allocated one `nvidia.com/gpu` resource |
 
 The NVIDIA setup mounts the WSL GPU device and driver files into the kind node, registers `/dev/dxg` with a pinned generic device plugin, and verifies `nvidia-smi` in a GPU-allocated pod before deploying the offload example.
+
+## 🧭 T0 Status
+
+These guides provide the optional single-laptop Kubernetes substrate allowed at T0,
+but they do not close the full robot lifecycle or validate the SO-101 path. See the
+[GPU Offload T0 Plan](./05-T0-plan.md) for the gap analysis, required integration
+changes, delivery sequence, and acceptance criteria.

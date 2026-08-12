@@ -37,7 +37,13 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 <!-- -->
 
 > [!TIP]
-> **Start on a laptop, not in the cloud.** The default starting path (T0 — Dev) closes the full capture -> train -> validate -> run loop on **one laptop and one robot**, with **zero cloud and zero Kubernetes**. Cloud, Kubernetes, Arc, and fleet components are tier-gated additions you adopt only when your scale demands them, not prerequisites. See [Start on a Laptop (T0 — Dev)](#-start-on-a-laptop-t0--dev) below.
+> **Start on a laptop, not in the cloud.** The default starting path (T0 — Dev)
+> closes the full capture -> train -> validate -> run loop on **one laptop and one
+> robot**, with **zero cloud and no required Kubernetes**. Plain local processes are
+> the baseline; a single-laptop kind cluster is an optional local orchestration profile
+> for GPU offload. Cloud, Arc, and fleet components are tier-gated additions you adopt
+> only when your scale demands them, not prerequisites. See
+> [Start on a Laptop (T0 — Dev)](#-start-on-a-laptop-t0--dev) below.
 
 ## 🛫 Start on a Laptop (T0 — Dev)
 
@@ -53,11 +59,11 @@ Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum
 - **Validate:** `run-local-lerobot-eval.py` / `play.py` locally.
 - **Run on robot:** the inference node as a plain process or container. No Flux, no gating, no GitOps.
 
-**Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
+**Edge infra:** ROS 2 and Docker; local kind and Helm are optional. **Cloud infra:** none.
 
 | Tier                | When to use it                                                             | Quick start                                                            |
 |---------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.            | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and no required Kubernetes.     | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
 | **T1 — Lab**        | One site, a few robots, a shared GPU box. First cloud: storage.            | [Tier 1 — Lab recipe](docs/recipes/tier-1-lab/README.md)               |
 | **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.         | [Tier 2 — Pilot recipe](docs/recipes/tier-2-pilot/README.md)           |
 | **T3 — Production** | Advanced. Single-site declarative deployment (local k3s + Flux, no Arc).   | [Tier 3 — Production recipe](docs/recipes/tier-3-production/README.md) |
@@ -66,7 +72,14 @@ Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum
 
 ⭐ default · ✅ recommended production
 
-Cloud training, model registries, Kubernetes (k3s/AKS), Azure Arc, and the fleet delivery/intelligence planes enter the picture only at the tier where they earn their keep. Pick your tier in [Getting Started → Choose Your Tier](docs/getting-started/README.md#choose-your-tier), read the tier-by-tier infrastructure boundaries in the [Architecture Overview](docs/contributing/architecture.md), and consult the canonical [Tier Model](docs/design/tier-model.md) for the authoritative tier table and vocabulary.
+Cloud training, model registries, production Kubernetes (k3s/AKS), Azure Arc, and
+the fleet delivery/intelligence planes enter the picture only at the tier where they
+earn their keep. An optional single-laptop kind cluster remains a T0 local tool, not
+production infrastructure. Pick your tier in
+[Getting Started → Choose Your Tier](docs/getting-started/README.md#choose-your-tier),
+read the tier-by-tier infrastructure boundaries in the
+[Architecture Overview](docs/contributing/architecture.md), and consult the canonical
+[Tier Model](docs/design/tier-model.md) for the authoritative tier table and vocabulary.
 
 > [!NOTE]
 > **Roadmap honesty.** T5 (Operate / fleet intelligence) is on the roadmap and not yet available. The fleet-intelligence domain is currently specified, with implementation planned. Today's shipping capability spans T0-T4.

@@ -14,7 +14,7 @@ The Physical AI Toolchain ships a powerful end-to-end stack, but it presents tha
 **all-or-nothing**. A newcomer reading the architecture documentation concludes they must stand up
 Azure Arc, AKS, FluxCD, ACSA, IoT Operations, and a cloud training plane *before they can do
 anything useful*. In reality, the repository's working code can close a complete capture → train →
-evaluate → run loop on a single laptop and one robot with **zero cloud and zero Kubernetes**. The
+evaluate → run loop on a single laptop and one robot with **zero cloud and no required Kubernetes**. The
 gap between what the code supports and what the documentation implies is the single largest barrier
 to entry.
 
@@ -162,7 +162,7 @@ T0–T2 satisfy Goal: Full Training Lifecycle with manual deployment. T3 adds si
 
 ## 5. Tier Detail
 
-### T0 — Dev. One robot, one laptop. No cloud, no Kubernetes
+### T0 — Dev. One robot, one laptop. No cloud, no required Kubernetes
 
 The honest floor for Goal: Full Training Lifecycle.
 
@@ -184,7 +184,8 @@ The honest floor for Goal: Full Training Lifecycle.
 > reproduce, compare across runs, or use to attribute a regression is an anecdote,
 > not a result, doubly so in the high-variance world of RL and IL.
 > File-backed MLflow and trackio run as local processes with no server, so tracking
-> stays inside the zero-cloud, zero-Kubernetes floor.
+> stays inside the zero-cloud floor. A single-laptop Kubernetes cluster is an
+> optional orchestration profile, not a prerequisite.
 > Tracking as a *hosted server* plus a *model registry* is a separate, later concern
 > (T2).
 

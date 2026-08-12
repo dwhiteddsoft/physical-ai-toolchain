@@ -455,7 +455,7 @@ def initfields(x):
     x.remotedclasskey_rmt0bf = remotedclasskey[type(x)]
 
 nodehydrate = [
-    'remoter.rmtclass//_getfromremote'
+#    'remoter.rmtclass//_getfromremote'
 ]
 
 def setRemotedClassInCache(obj, remotedClasses: dict, callbackonCacheAdd : Callable|None) -> None:
@@ -536,9 +536,9 @@ def dehydrate(obj : Any, key : str, remotedclasscache : dict, loc : str, isresul
     if not isresult and localhasattr(obj, 'setremoteloc'):
         obj.setremoteloc(loc) # on client side set location to where object is going to be located
     # go through the object and replace any RemotedClass with its uuid
-    if type(obj) in remotedclasses: # this is more appropriate since isinstance will return true for subclasses
+    if (type(obj) in remotedclasses and (obj.remoteable_rmt0bf or isresult)): # this is more appropriate since isinstance will return true for subclasses
         if not localhasattr(obj, 'uuid_rmt0bf'):
-            assert isresult, "Remoted class instance without uuid_rmt0bf found during dehydration on client side"
+            assert isresult, f"Remoted class instance of type {obj.__class__} without uuid_rmt0bf found during dehydration on client side"
             initfields(obj)
             if isresult:
                 # set remoteloc to loc - on server side loc is coming from funcargs which is the location of server as seen by client

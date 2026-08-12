@@ -85,8 +85,8 @@ def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
     if obj.layout != torch.strided:
         raise TypeError(f"Cannot serialize tensor with layout {obj.layout}; register an explicit adapter")
 
-    contiguous = obj.detach().cpu().contiguous().reshape(-1).clone()
-    data = bytes(contiguous.untyped_storage()) if contiguous.numel() else b""
+    contiguous = obj.detach().cpu().contiguous().reshape(-1)
+    data = contiguous.view(torch.uint8).numpy().tobytes() if contiguous.numel() else b""
     return {
         TYPE_KEY: _qualname(type(obj)),
         TENSOR_KEY: {
@@ -119,7 +119,7 @@ def _tensor_from_dict(target: type[Any], payload: Any) -> Any:
         raise TypeError("Tensor payload data must be bytes")
 
     if data:
-        tensor = torch.frombuffer(bytearray(data), dtype=dtype).clone().reshape(shape)
+        tensor = torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
     else:
         tensor = torch.empty(shape, dtype=dtype)
     tensor = tensor.to(payload.get("device", "cpu"))

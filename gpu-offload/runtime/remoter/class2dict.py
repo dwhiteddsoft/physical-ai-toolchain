@@ -16,17 +16,51 @@ TYPE_KEY = "__type__"
 VALUE_KEY = "__value__"
 
 _PRIMITIVES = (str, int, float, bool, type(None))
+_NAME_TO_TYPE: dict[str, type[Any]] = {}
+_TYPE_TO_NAME: dict[type[Any], str] = {}
 
 
 def _qualname(cls: type) -> str:
-    return f"{cls.__module__}:{cls.__qualname__}"
+    return _TYPE_TO_NAME.get(cls, f"{cls.__module__}:{cls.__qualname__}")
+
+
+def register_type(cls: type[Any], *, name: str | None = None) -> None:
+    """Register a stable wire name for a class2dict-serialized type."""
+    wire_name = name or f"{cls.__module__}:{cls.__qualname__}"
+    module_name, separator, qualname = wire_name.partition(":")
+    if not separator or not module_name or not qualname:
+        raise ValueError("class2dict type name must use the format 'module:qualname'")
+
+    registered_type = _NAME_TO_TYPE.get(wire_name)
+    if registered_type is not None and registered_type is not cls:
+        raise ValueError(f"class2dict type name {wire_name!r} is already registered")
+
+    registered_name = _TYPE_TO_NAME.get(cls)
+    if registered_name is not None and registered_name != wire_name:
+        raise ValueError(f"class {cls!r} is already registered as {registered_name!r}")
+
+    _NAME_TO_TYPE[wire_name] = cls
+    _TYPE_TO_NAME[cls] = wire_name
 
 
 def _resolve(path: str) -> type:
+    registered_type = _NAME_TO_TYPE.get(path)
+    if registered_type is not None:
+        return registered_type
+
     module_name, _, qualname = path.partition(":")
-    obj: Any = importlib.import_module(module_name)
+    try:
+        obj: Any = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        raise TypeError(
+            f"Cannot reconstruct class2dict type {path!r}: module {module_name!r} is not importable. "
+            "Install the defining module on this endpoint or register the local equivalent with "
+            "remoter.register_class2dict_type(..., wire_name=<sender type name>)."
+        ) from exc
     for part in qualname.split("."):
         obj = getattr(obj, part)
+    if not isinstance(obj, type):
+        raise TypeError(f"Resolved class2dict type {path!r} to non-type object {obj!r}")
     return obj
 
 
@@ -98,4 +132,4 @@ def from_dict(data: Any, cls: type | None = None) -> Any:
         return instance
 
 
-__all__ = ["to_dict", "from_dict", "TYPE_KEY", "VALUE_KEY"]
+__all__ = ["to_dict", "from_dict", "register_type", "TYPE_KEY", "VALUE_KEY"]

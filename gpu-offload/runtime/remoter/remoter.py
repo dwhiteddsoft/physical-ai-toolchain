@@ -451,6 +451,11 @@ def register_codec_adapter(adapter: TypeAdapter) -> None:
     _CODEC_REGISTRY.register(adapter)
 
 
+def register_class2dict_type(cls: type[Any], *, wire_name: str | None = None) -> None:
+    """Register a stable class2dict wire name or map a remote name to a local class."""
+    class2dict.register_type(cls, name=wire_name)
+
+
 def register_state_adapter(
     *,
     ext_code: int,

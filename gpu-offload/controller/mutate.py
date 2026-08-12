@@ -45,6 +45,7 @@ ALLOWED_SERVER_VOLUME_TYPES = {
     "downwardAPI",
     "emptyDir",
     "ephemeral",
+    "hostPath",
     "persistentVolumeClaim",
     "projected",
     "secret",
@@ -480,8 +481,6 @@ def _volume_lookup(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _volume_is_allowed_for_server(volume: dict[str, Any]) -> bool:
-    if "hostPath" in volume:
-        return False
     return any(key in volume for key in ALLOWED_SERVER_VOLUME_TYPES)
 
 

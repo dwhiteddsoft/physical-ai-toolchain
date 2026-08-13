@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import enum
 import importlib
+import uuid
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from typing import Any
@@ -16,7 +17,7 @@ TYPE_KEY = "__type__"
 VALUE_KEY = "__value__"
 TENSOR_KEY = "__tensor__"
 
-_PRIMITIVES = (str, bytes, int, float, bool, type(None))
+_PRIMITIVES = (str, bytes, int, float, bool, uuid.UUID, type(None))
 _NAME_TO_TYPE: dict[str, type[Any]] = {}
 _TYPE_TO_NAME: dict[type[Any], str] = {}
 
@@ -190,13 +191,10 @@ def from_dict(data: Any, cls: type | None = None) -> Any:
 
     payload = {k: from_dict(v) for k, v in data.items() if k != TYPE_KEY}
 
-    try:
-        return target(**payload)
-    except TypeError:
-        instance = object.__new__(target)
-        for key, value in payload.items():
-            setattr(instance, key, value)
-        return instance
+    instance = object.__new__(target)
+    for key, value in payload.items():
+        object.__setattr__(instance, key, value)
+    return instance
 
 
 __all__ = ["TENSOR_KEY", "TYPE_KEY", "VALUE_KEY", "from_dict", "register_type", "to_dict"]

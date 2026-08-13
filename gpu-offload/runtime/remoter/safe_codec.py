@@ -107,7 +107,8 @@ _BLOB_THRESHOLD = 64 * 1024
 _RESERVED_EXT_TUPLE = 1
 _RESERVED_EXT_UUID = 2
 _RESERVED_EXT_BLOB = 3
-_RESERVED_EXT_CODES = {_RESERVED_EXT_TUPLE, _RESERVED_EXT_UUID, _RESERVED_EXT_BLOB}
+_RESERVED_EXT_BIGINT = 4
+_RESERVED_EXT_CODES = {_RESERVED_EXT_TUPLE, _RESERVED_EXT_UUID, _RESERVED_EXT_BLOB, _RESERVED_EXT_BIGINT}
 
 
 def dumps(
@@ -213,8 +214,18 @@ def _encode_value(
     if depth > limits.max_nesting:
         raise CodecLimitsError(f"nesting depth {depth} exceeds max_nesting={limits.max_nesting}")
 
-    if value is None or isinstance(value, (bool, int, float)):
+    if value is None or isinstance(value, (bool, float)):
         return value
+    if isinstance(value, int):
+        if -(1 << 63) <= value <= (1 << 64) - 1:
+            return value
+        magnitude = abs(value).to_bytes((abs(value).bit_length() + 7) // 8, "big")
+        if len(magnitude) + 1 > limits.max_bytes_length:
+            raise CodecLimitsError(
+                f"bigint bytes {len(magnitude) + 1} exceed max_bytes_length={limits.max_bytes_length}"
+            )
+        sign = b"\x01" if value < 0 else b"\x00"
+        return msgpack.ExtType(_RESERVED_EXT_BIGINT, sign + magnitude)
     if isinstance(value, str):
         if len(value) > limits.max_str_length:
             raise CodecLimitsError(f"string length {len(value)} exceeds max_str_length={limits.max_str_length}")
@@ -339,6 +350,12 @@ def _decode_value(
             if len(value.data) != 16:
                 raise CodecError("UUID extension payload must be 16 bytes")
             return uuid.UUID(bytes=value.data)
+
+        if value.code == _RESERVED_EXT_BIGINT:
+            if len(value.data) < 2 or value.data[0] not in (0, 1) or value.data[1] == 0:
+                raise CodecError("invalid bigint extension payload")
+            magnitude = int.from_bytes(value.data[1:], "big")
+            return -magnitude if value.data[0] else magnitude
 
         adapter = registry.find_by_code(value.code)
         if adapter is None:

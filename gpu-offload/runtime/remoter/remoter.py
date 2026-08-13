@@ -1778,7 +1778,11 @@ class Remoter:
         logger.debug(f"Sending result for function {fnid} -- funckey: {funcargs['key']}")
         msg = int.to_bytes(MessageType.FunctionResult, 1, "big")
         msg += fnid.bytes
-        payload = self.encode_result(funcargs, result, ex, partial(self.addclasstoconn, conn))
+        try:
+            payload = self.encode_result(funcargs, result, ex, partial(self.addclasstoconn, conn))
+        except Exception as serialization_error:
+            logger.error(f"Failed to encode result for function {fnid}: {serialization_error}", exc_info=True)
+            payload = self.encode_result(funcargs, None, serialization_error, None)
         msg += payload
         # send the message to the client
         logger.info(f"Sending result message of length {len(msg)} for function {fnid}")

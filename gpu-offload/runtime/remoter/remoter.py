@@ -36,8 +36,6 @@ from .safe_codec import (
     AdapterRegistry,
     CodecError,
     CodecLimits,
-    CodecLimitsError,
-    CodecTypeError,
     TypeAdapter,
 )
 from .safe_codec import (
@@ -502,6 +500,18 @@ _CODEC_REGISTRY.register_fallback(
     )
 )
 
+_RESULT_SERIALIZATION_FAILURE_PAYLOAD = serialize_payload(
+    (
+        {"key": "unknown", "loc": "unknown"},
+        None,
+        RemoteErrorDescriptor(
+            type_name="ResultSerializationError",
+            message="Failed to serialize remote result",
+            traceback="",
+        ),
+    )
+)
+
 
 def initfields(x):
     x.uuid_rmt0bf = uuid.uuid4()  # consistent on client and server side
@@ -725,12 +735,28 @@ def encode_function_call(func, loc: str, remotedclasscache: dict, callbackOnCach
     return payload
 
 
-def decode_function_call(payload, conn, remotedClasses, callbackOnCacheAdd) -> tuple[Callable, dict, tuple, dict]:
+def decode_function_call(
+    payload, conn, remotedClasses, callbackOnCacheAdd
+) -> tuple[Callable | None, dict, tuple, dict, CodecError | None]:
     try:
-        loc, key, module_name, func_name, class_name, args, kwargs = deserialize_payload(payload)
-    except (CodecError, CodecLimitsError, CodecTypeError) as exc:
+        decoded = deserialize_payload(payload)
+    except (CodecError, TypeError, ValueError) as exc:
+        decode_error = exc if isinstance(exc, CodecError) else CodecError(str(exc))
+        logger.error(f"Failed to decode function call payload: {decode_error}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, decode_error
+    if not isinstance(decoded, tuple) or len(decoded) != 7:
+        exc = CodecError("Function call payload must contain seven fields")
         logger.error(f"Failed to decode function call payload: {exc}")
-        raise
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
+    loc, key, module_name, func_name, class_name, args, kwargs = decoded
+    if not all(isinstance(value, str) for value in (loc, key, module_name, func_name, class_name)):
+        exc = CodecError("Function call metadata fields must be strings")
+        logger.error(f"Failed to decode function call payload: {exc}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
+    if not isinstance(args, tuple) or not isinstance(kwargs, dict):
+        exc = CodecError("Function call arguments must be a tuple and mapping")
+        logger.error(f"Failed to decode function call payload: {exc}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
     logger.debug(f"=====Decoded function for key {key} to location {loc}=====")
     funcargs = {
         "key": key,
@@ -752,7 +778,7 @@ def decode_function_call(payload, conn, remotedClasses, callbackOnCacheAdd) -> t
             logger.debug(f"Setting remoted class with ID {argsn[0].uuid_rmt0bf} owner to True")
     # Get the function object
     func_obj = getfuncobjfromname(key, module_name, func_name, class_name)
-    return func_obj, funcargs, argsn, kwargs
+    return func_obj, funcargs, argsn, kwargs, None
 
 
 # return a message to send to the remote server
@@ -812,15 +838,19 @@ def functionToMsg(func, loc: str, functype, fnid: uuid.UUID, remotedClassesCache
     return msg
 
 
-def msgToFunction(msg, conn, remotedClasses, callbackOnCacheAdd) -> tuple[uuid.UUID, str, Callable, dict, tuple, dict]:
+def msgToFunction(
+    msg, conn, remotedClasses, callbackOnCacheAdd
+) -> tuple[uuid.UUID, str, Callable | None, dict, tuple, dict, CodecError | None]:
     msgtype = msg[0]
     assert msgtype == MessageType.FunctionCall, f"Invalid message type: {msgtype}"
     functype = FunctionType.fromint(msg[1])
     # Get the function ID
     fnid = uuid.UUID(bytes=msg[2:18])
     payload = msg[18:]
-    func_obj, funcargs, args, kwargs = decode_function_call(payload, conn, remotedClasses, callbackOnCacheAdd)
-    return fnid, functype, func_obj, funcargs, args, kwargs
+    func_obj, funcargs, args, kwargs, decode_error = decode_function_call(
+        payload, conn, remotedClasses, callbackOnCacheAdd
+    )
+    return fnid, functype, func_obj, funcargs, args, kwargs, decode_error
 
 
 class Remoter:
@@ -1752,9 +1782,14 @@ class Remoter:
 
         # get the function object and arguments
         # print(msg)
-        fnid, functype, func_obj, funcargs, args, kwargs = msgToFunction(
+        fnid, functype, func_obj, funcargs, args, kwargs, decode_error = msgToFunction(
             msg, conn, self.remotedClasses, partial(self.addclasstoconn, conn)
         )
+        if decode_error is not None:
+            logger.error(f"Failed to decode function call with ID {fnid}: {decode_error}")
+            callback(fnid, None, decode_error, funcargs)
+            return fnid, None, {}
+        assert func_obj is not None
         ret, classuid = self.callfunction(functype, fnid, func_obj, funcargs, callback, None, *args, **kwargs)
         return fnid, classuid, ret
 
@@ -1782,7 +1817,16 @@ class Remoter:
             payload = self.encode_result(funcargs, result, ex, partial(self.addclasstoconn, conn))
         except Exception as serialization_error:
             logger.error(f"Failed to encode result for function {fnid}: {serialization_error}", exc_info=True)
-            payload = self.encode_result(funcargs, None, serialization_error, None)
+            try:
+                error_payload = RemoteErrorDescriptor(
+                    type_name=type(serialization_error).__name__,
+                    message=str(serialization_error),
+                    traceback=traceback.format_exc(),
+                )
+                payload = serialize_payload(({"key": "unknown", "loc": "unknown"}, None, error_payload))
+            except Exception:
+                logger.error(f"Failed to encode serialization error for function {fnid}", exc_info=True)
+                payload = _RESULT_SERIALIZATION_FAILURE_PAYLOAD
         msg += payload
         # send the message to the client
         logger.info(f"Sending result message of length {len(msg)} for function {fnid}")
@@ -1825,12 +1869,19 @@ class Remoter:
 
     def decode_result(self, payload: bytes, loc: str, conn) -> tuple[dict, Any, Exception | None]:
         logger.debug(f"Decoding result of length {len(payload)}")
-        funcargs, result, ex_payload = deserialize_payload(payload)
+        if not payload:
+            raise CodecError("Empty payload received for function result")
+        decoded = deserialize_payload(payload)
+        if not isinstance(decoded, tuple) or len(decoded) != 3:
+            raise CodecError("Function result payload must contain three fields")
+        funcargs, result, ex_payload = decoded
+        if not isinstance(funcargs, dict):
+            raise CodecError("Function result metadata must be a mapping")
         try:
             result = rehydrate(result, self.remotedClasses, loc, True, None)
-        except Exception as e:
-            logger.error(f"Error rehydrating result: {e} {traceback.format_exc()}")
-            raise e
+        except Exception:
+            logger.error("Error rehydrating result", exc_info=True)
+            raise
         ex: Exception | None
         if ex_payload is None:
             ex = None
@@ -1857,7 +1908,19 @@ class Remoter:
         # get the function ID
         fnid = uuid.UUID(bytes=message[1:17])
         payload = message[17:]
-        funcargs, result, ex = self.decode_result(payload, loc, conn)
+        try:
+            funcargs, result, ex = self.decode_result(payload, loc, conn)
+        except Exception as exc:
+            logger.error(f"Failed to decode result for function {fnid}", exc_info=True)
+            funcargs = {"key": "unknown", "loc": loc}
+            result = None
+            ex = RemoteExecutionError(
+                RemoteErrorDescriptor(
+                    type_name="ResultDecodeError",
+                    message=str(exc),
+                    traceback=traceback.format_exc(),
+                )
+            )
         # set the event to unblock the waiting thread
         self.qcallback(fnid, result, ex, funcargs)
 

@@ -9,6 +9,7 @@ from remoter import class2dict, remoter
 from remoter.safe_codec import (
     AdapterContext,
     AdapterRegistry,
+    CodecError,
     CodecLimits,
     CodecLimitsError,
     CodecTypeError,
@@ -223,6 +224,54 @@ def test_remote_attribute_error_preserves_python_attribute_fallback() -> None:
     assert str(ex) == "value2x"
 
 
+def test_malformed_function_call_returns_wire_safe_error() -> None:
+    runtime = remoter.Remoter.createemptyinstance()
+    runtime.remotedClasses = {}
+    fnid = uuid.uuid4()
+    callback_args: list[tuple[uuid.UUID, object, Exception, dict[str, object]]] = []
+    payload = remoter.serialize_payload(("only", "two"))
+    message = b"".join(
+        (
+            int.to_bytes(remoter.MessageType.FunctionCall, 1, "big"),
+            int.to_bytes(remoter.FunctionType.toint(remoter.FunctionType.Direct), 1, "big"),
+            fnid.bytes,
+            payload,
+        )
+    )
+
+    returned_fnid, classuid, task = runtime.execfunction(
+        message,
+        lambda *args: callback_args.append(args),
+        None,
+    )
+
+    assert returned_fnid == fnid
+    assert classuid is None
+    assert task == {}
+    assert len(callback_args) == 1
+    _, result, ex, funcargs = callback_args[0]
+    assert result is None
+    assert isinstance(ex, CodecError)
+    assert "seven fields" in str(ex)
+    assert funcargs == {"key": "unknown", "loc": "unknown"}
+
+    error_payload = runtime.encode_result(funcargs, None, ex, None)
+    decoded_funcargs, decoded_result, decoded_error = runtime.decode_result(error_payload, "direct", None)
+    assert decoded_funcargs == funcargs
+    assert decoded_result is None
+    assert isinstance(decoded_error, remoter.RemoteExecutionError)
+    assert "seven fields" in str(decoded_error)
+
+
+def test_decode_result_rejects_invalid_envelope() -> None:
+    runtime = remoter.Remoter.createemptyinstance()
+    runtime.remotedClasses = {}
+    payload = remoter.serialize_payload(("only", "two"))
+
+    with pytest.raises(CodecError, match="must contain three fields"):
+        runtime.decode_result(payload, "direct", None)
+
+
 def test_send_result_returns_serialization_failure_to_client() -> None:
     class FakeMessenger:
         def __init__(self) -> None:
@@ -253,6 +302,56 @@ def test_send_result_returns_serialization_failure_to_client() -> None:
     assert isinstance(ex, remoter.RemoteExecutionError)
     assert "Cannot serialize object" in str(ex)
     assert fnid not in conn["fns"]
+
+
+def test_send_result_uses_preencoded_fallback_when_error_encoding_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeMessenger:
+        def __init__(self) -> None:
+            self.messages: list[bytes] = []
+
+        def senddata(self, message: bytes) -> None:
+            self.messages.append(message)
+
+    runtime = remoter.Remoter.createemptyinstance()
+    runtime.remotedClasses = {}
+    fnid = uuid.uuid4()
+    messenger = FakeMessenger()
+    conn = {
+        "alive": True,
+        "classes": set(),
+        "fns": {fnid: object()},
+        "lock": threading.Lock(),
+    }
+
+    monkeypatch.setattr(runtime, "encode_result", lambda *_args, **_kwargs: (_ for _ in ()).throw(TypeError("bad")))
+    monkeypatch.setattr(remoter, "serialize_payload", lambda _payload: (_ for _ in ()).throw(TypeError("worse")))
+
+    runtime.sendResult(messenger, conn, fnid, None, None, {"key": "unit/test", "loc": "direct"})
+
+    assert len(messenger.messages) == 1
+    _, result, ex = runtime.decode_result(messenger.messages[0][17:], "direct", None)
+    assert result is None
+    assert isinstance(ex, remoter.RemoteExecutionError)
+    assert "Failed to serialize remote result" in str(ex)
+    assert fnid not in conn["fns"]
+
+
+def test_unpack_result_converts_decode_failure_to_remote_error() -> None:
+    runtime = remoter.Remoter.createemptyinstance()
+    captured: list[tuple[uuid.UUID, object, Exception, dict[str, object]]] = []
+    runtime.qcallback = lambda *args: captured.append(args)
+    fnid = uuid.uuid4()
+    message = int.to_bytes(remoter.MessageType.FunctionResult, 1, "big") + fnid.bytes
+
+    runtime.unpackResult(message, "tcp://client", None)
+
+    assert len(captured) == 1
+    returned_fnid, result, ex, funcargs = captured[0]
+    assert returned_fnid == fnid
+    assert result is None
+    assert isinstance(ex, remoter.RemoteExecutionError)
+    assert "Empty payload received" in str(ex)
+    assert funcargs == {"key": "unknown", "loc": "tcp://client"}
 
 
 def test_imagep_style_adapter() -> None:

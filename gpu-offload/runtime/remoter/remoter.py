@@ -1912,8 +1912,15 @@ class Remoter:
             logger.error(f"Unknown message type: {msgtype}")
 
 
-global remoter
-remoter: Remoter = Remoter.createemptyinstance()
+remoter: Remoter | None = None
+_remoter_init_lock = threading.Lock()
+
+
+def _require_remoter() -> Remoter:
+    runtime = remoter
+    if runtime is None or not runtime.init:
+        raise RuntimeError("Remoter not initialized")
+    return runtime
 
 
 def initRemoter(
@@ -1927,18 +1934,20 @@ def initRemoter(
         )
     # initialize the remoter
     global remoter
-    if configfromkube is not None:
-        rmtconfigkube.rmtconfigkube_init(
-            configfromkube, locconfig
-        )  # won't properly work if initialized from here if remoteloc, remoteable params are set
-    if remoter is None or not remoter.init:
-        logger.info(f"Initializing remoter on {host}:{port}")
-        remoter = Remoter(config, host, port, sockpath, rmtloc, rmtport, allowall, locconfig)
-    else:
-        logger.info("Remoter already initialized")
+    with _remoter_init_lock:
+        if configfromkube is not None:
+            rmtconfigkube.rmtconfigkube_init(
+                configfromkube, locconfig
+            )  # won't properly work if initialized from here if remoteloc, remoteable params are set
+        if remoter is None or not remoter.init:
+            logger.info(f"Initializing remoter on {host}:{port}")
+            remoter = Remoter(config, host, port, sockpath, rmtloc, rmtport, allowall, locconfig)
+        else:
+            logger.info("Remoter already initialized")
+        runtime = remoter
     if onlyrunserver:
-        remoter.onlyRunServer()  # does not return
-    return remoter
+        runtime.onlyRunServer()  # does not return
+    return runtime
 
 
 def initRemoterFromArgs(args):
@@ -2017,7 +2026,7 @@ def createRemotedTask(
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        assert remoter is not None, "Remoter not initialized"
+        runtime = _require_remoter()
         # Call the remote function
         remotedclassfunc = checkForRemotedClass(taskname, func, *args)
         if remotedclassfunc:
@@ -2025,11 +2034,11 @@ def createRemotedTask(
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return remoter.runSyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runSyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
 
     @wraps(func)
     def wrapper_async(*args, **kwargs):
-        assert remoter is not None, "Remoter not initialized"
+        runtime = _require_remoter()
         # Call the remote function
         remotedclassfunc = checkForRemotedClass(taskname, func, *args)
         if remotedclassfunc:
@@ -2037,7 +2046,7 @@ def createRemotedTask(
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return remoter.runAsyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runAsyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
 
     if inspect.iscoroutinefunction(func):
         isasync = True

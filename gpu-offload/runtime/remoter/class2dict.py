@@ -16,7 +16,7 @@ TYPE_KEY = "__type__"
 VALUE_KEY = "__value__"
 TENSOR_KEY = "__tensor__"
 
-_PRIMITIVES = (str, int, float, bool, type(None))
+_PRIMITIVES = (str, bytes, int, float, bool, type(None))
 _NAME_TO_TYPE: dict[str, type[Any]] = {}
 _TYPE_TO_NAME: dict[type[Any], str] = {}
 

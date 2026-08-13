@@ -460,7 +460,6 @@ terraform.rc
 
 .venv/
 venv/
-gpu-offload/**/uv.lock
 .hypothesis/
 **/out/*
 .copilot-tracking/

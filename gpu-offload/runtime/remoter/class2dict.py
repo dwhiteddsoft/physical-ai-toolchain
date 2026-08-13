@@ -12,6 +12,7 @@ import sys
 import uuid
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
+from threading import Lock
 from typing import Any
 
 TYPE_KEY = "__type__"
@@ -21,6 +22,9 @@ TENSOR_KEY = "__tensor__"
 _PRIMITIVES = (str, bytes, int, float, bool, uuid.UUID, type(None))
 _NAME_TO_TYPE: dict[str, type[Any]] = {}
 _TYPE_TO_NAME: dict[type[Any], str] = {}
+_UNAVAILABLE_TENSOR_DEVICES: dict[str, None] = {}
+_UNAVAILABLE_TENSOR_DEVICES_LOCK = Lock()
+_UNAVAILABLE_TENSOR_DEVICES_MAX_SIZE = 32
 
 
 def _qualname(cls: type) -> str:
@@ -77,6 +81,18 @@ def _is_torch_tensor_type(cls: type[Any]) -> bool:
     return any(base.__module__ == "torch" and base.__name__ == "Tensor" for base in cls.__mro__)
 
 
+def _is_tensor_device_unavailable(device: str) -> bool:
+    with _UNAVAILABLE_TENSOR_DEVICES_LOCK:
+        return device in _UNAVAILABLE_TENSOR_DEVICES
+
+
+def _remember_unavailable_tensor_device(device: str) -> None:
+    with _UNAVAILABLE_TENSOR_DEVICES_LOCK:
+        _UNAVAILABLE_TENSOR_DEVICES[device] = None
+        if len(_UNAVAILABLE_TENSOR_DEVICES) > _UNAVAILABLE_TENSOR_DEVICES_MAX_SIZE:
+            del _UNAVAILABLE_TENSOR_DEVICES[next(iter(_UNAVAILABLE_TENSOR_DEVICES))]
+
+
 def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
     if not _is_torch_tensor_type(type(obj)):
         return None
@@ -100,7 +116,7 @@ def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
     }
 
 
-def _tensor_from_dict(target: type[Any], payload: Any) -> Any:
+def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None) -> Any:
     torch = _get_torch()
     if torch is None or not issubclass(target, torch.Tensor):
         raise TypeError(f"Cannot reconstruct tensor type {target!r}: PyTorch is not installed")
@@ -118,12 +134,24 @@ def _tensor_from_dict(target: type[Any], payload: Any) -> Any:
     data = payload.get("data")
     if not isinstance(data, bytes):
         raise TypeError("Tensor payload data must be bytes")
+    source_device = payload.get("device", "cpu")
+    if not isinstance(source_device, str):
+        raise TypeError("Tensor payload device must be a string")
 
     if data:
         tensor = torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
     else:
         tensor = torch.empty(shape, dtype=dtype)
-    tensor = tensor.to(payload.get("device", "cpu"))
+    target_device = device if device is not None else source_device
+    if device is None and _is_tensor_device_unavailable(source_device):
+        target_device = "cpu"
+    try:
+        tensor = tensor.to(target_device)
+    except (AssertionError, RuntimeError, TypeError, ValueError):
+        if device is not None or target_device == "cpu":
+            raise
+        _remember_unavailable_tensor_device(source_device)
+        tensor = tensor.to("cpu")
     tensor.requires_grad_(bool(payload.get("requires_grad", False)))
     if target is torch.Tensor:
         return tensor
@@ -162,22 +190,22 @@ def to_dict(obj: Any) -> Any:
     return data
 
 
-def from_dict(data: Any, cls: type | None = None) -> Any:
-    """Rebuild an object previously produced by :func:`to_dict`."""
+def from_dict(data: Any, cls: type | None = None, *, device: Any | None = None) -> Any:
+    """Rebuild an object on ``device``, or use the source device with CPU fallback."""
     if isinstance(data, _PRIMITIVES):
         return data
     if isinstance(data, list):
-        return [from_dict(item) for item in data]
+        return [from_dict(item, device=device) for item in data]
     if not isinstance(data, dict):
         return data
 
     if TYPE_KEY not in data and cls is None:
-        return {key: from_dict(value) for key, value in data.items()}
+        return {key: from_dict(value, device=device) for key, value in data.items()}
 
     target = cls if cls is not None else _resolve(data[TYPE_KEY])
 
     if TENSOR_KEY in data:
-        return _tensor_from_dict(target, data[TENSOR_KEY])
+        return _tensor_from_dict(target, data[TENSOR_KEY], device)
 
     if VALUE_KEY in data:
         value = data[VALUE_KEY]
@@ -186,10 +214,10 @@ def from_dict(data: Any, cls: type | None = None) -> Any:
         if isinstance(target, type) and issubclass(target, (datetime, date)):
             return target.fromisoformat(value)
         if isinstance(target, type) and issubclass(target, (tuple, set, frozenset)):
-            return target(from_dict(item) for item in value)
+            return target(from_dict(item, device=device) for item in value)
         return target(value)
 
-    payload = {k: from_dict(v) for k, v in data.items() if k != TYPE_KEY}
+    payload = {k: from_dict(v, device=device) for k, v in data.items() if k != TYPE_KEY}
 
     instance = object.__new__(target)
     for key, value in payload.items():

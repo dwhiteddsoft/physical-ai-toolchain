@@ -80,7 +80,9 @@ location file.
 > `hostPath` to `ALLOWED_SERVER_VOLUME_TYPES`. The mutating admission webhook now copies host
 > filesystem mounts into the server Deployments it generates. The motivation (model files missing
 > from the server pod) is legitimate, but an unconditional allowance is a privilege-escalation
-> surface. Gate it behind a path allowlist or an explicit opt-in field.
+> surface. Gate it behind a path allowlist or an explicit opt-in field. See
+> [hostPath Propagation — Author Response](#-hostpath-propagation--author-response) for the
+> detailed assessment.
 
 | Severity | Issue                                                                                                                                                                                                                                                                       |
 |----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -93,6 +95,62 @@ location file.
 | Low      | Review opacity. `remoter.py` mixes a wholesale reformat with the logic rewrite; roughly half the diff is reflow, which obscures the behavioral change.                                                                                                                      |
 | Low      | Convention drift. `class2dict.py` uses `importlib.import_module("torch")`; the "remove importlib for safety" commit cleaned only `_resolve`. Some reformatted blocks also diverge from the surrounding line-length style.                                                   |
 
+## 🔍 hostPath Propagation — Author Response
+
+The PR author justified the change as follows:
+
+> Had to reintroduce hostpath volumes which are present in client to server. I believe this should be
+> okay since not new hostpath volumes are being introduced. This is needed since the model may be
+> cached and sitting on the host. There is no need to redownload the model inside the container which
+> is extremely slow, or build it into the container image.
+
+### What the code confirms
+
+The factual core of the claim holds. `copy_allowed_volumes_and_mounts` copies only volumes whose
+names appear in the client xavier container's `volumeMounts`, and it deep-copies both the volume
+definition and the mount, so `readOnly` is preserved and no path is invented. The generated
+Deployment uses the client's namespace and inherits `serviceAccountName`. On the path and identity
+axes, a user who can set the annotation could already mount that hostPath directly.
+
+The motivation is also sound. Re-downloading multi-gigabyte weights per pod and baking them into the
+image are both poor answers.
+
+### Why the invariant is insufficient
+
+hostPath privilege is scoped to (path × node), not to path alone, and the copy crosses both a node
+boundary and an identity boundary.
+
+| # | Gap                        | Detail                                                                                                                                                                                                                                                                                                                                                                  |
+|---|----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | Node boundary              | The client pod and generated server Deployment are separate scheduling units. Only `serviceAccountName` and `imagePullSecrets` are copied; the client's `nodeSelector`, affinity, and tolerations are not. The server's `nodeSelector` comes solely from the Xavier config, so the server can land on a node the client never touched.                                  |
+| 2 | Directory auto-creation    | A `hostPath` with no `type` (default `""`) creates the directory as root when absent. Propagating to a new node creates root-owned directories on nodes with no prior workload footprint, which is a new capability.                                                                                                                                                    |
+| 3 | Silent cache miss          | If the server lands on a different node the cache is not there. The mount succeeds against an empty auto-created directory and the model re-downloads anyway. The feature delivers its benefit only when client and server co-locate — true for single-node kind and T0, generally false on a real GPU cluster where the server is deliberately placed on the GPU node. |
+| 4 | Unchecked path and type    | `_volume_is_allowed_for_server` is now bare key presence. `/`, `/var/run/docker.sock`, `/var/lib/kubelet`, and `/etc/kubernetes/pki` all propagate unchecked.                                                                                                                                                                                                           |
+| 5 | Identity asymmetry         | The client pod was admitted under the user's identity; the server Deployment is created by the controller ServiceAccount, which holds a ClusterRole with `create` on `deployments` and `statefulsets` cluster-wide. Namespace-scoped Pod Security Admission still applies to the resulting pods, but any policy keyed on requesting identity evaluates differently.     |
+| 6 | Fan-out                    | `serverreplicas` and per-client stages turn one client hostPath into many server pods across many nodes.                                                                                                                                                                                                                                                                |
+| 7 | securityContext divergence | The server container's `securityContext` comes from the Xavier config or stage, not from the client container. A read-write hostPath mounted by a hardened client can reappear under a permissive config-supplied context. Mount-level `readOnly` is preserved, which bounds this.                                                                                      |
+
+> [!NOTE]
+> Gap 5 has a real mitigation: namespace-scoped Pod Security Admission is identity-independent, so a
+> `restricted` namespace still rejects the server pod. The failure mode then becomes "server pods
+> silently never appear", which converts a security issue into a reliability issue rather than
+> eliminating it.
+
+### Recommended resolution
+
+1. Prefer a `local` PersistentVolume with `nodeAffinity`, or a node-local PVC, for the model cache.
+   This provides the same "cached on host, no re-download" property and pins scheduling so the cache
+   is actually present. `persistentVolumeClaim` is already in `ALLOWED_SERVER_VOLUME_TYPES`, so no
+   controller change is required, and it removes the silent cache-miss failure in gap 3.
+2. If hostPath must remain, make it opt-in and constrained: a chart-level allowed-path prefix list
+   checked against `hostPath.path`, a required `type` of `Directory` or `File` rather than the
+   auto-creating `""`, and a forced `readOnly: true` on copied hostPath mounts.
+3. Copy the client's scheduling constraints to the server whenever a hostPath is propagated, or
+   refuse to propagate hostPath when the stage overrides `nodeSelector`. Without this the feature
+   silently no-ops.
+4. Replace the stale assertion in `test_build_desired_server_deployments_merges_supported_schema_fields`
+   so the new behavior is actually covered.
+
 ## 🧭 Merge Guidance
 
 1. `mutate.py` — take the PR version wholesale. Both local changes are already present under
@@ -101,6 +159,7 @@ location file.
 2. `mutate-deployment.yaml` — take the PR's `/usr/local/bin/python3`.
 3. `autoremote.py` — take the PR's `mkdtemp` block and drop the local
    `locconfigfile = "/tmp/rmtconfigkube.yaml"` line, otherwise two competing mechanisms remain.
-4. Before accepting, gate the `hostPath` allowance and fix or replace the stale volume assertion in
-   `test_mutate.py`.
+4. Before accepting, constrain the `hostPath` allowance (see
+   [hostPath Propagation — Author Response](#-hostpath-propagation--author-response)) and fix or
+   replace the stale volume assertion in `test_mutate.py`.
 5. Restore a non-empty `mutate.image.repository` default, or confirm every consumer sets it.

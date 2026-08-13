@@ -129,6 +129,18 @@ def test_remote_error_descriptor_round_trip() -> None:
     assert "bad input" in str(ex)
 
 
+def test_remote_attribute_error_preserves_python_attribute_fallback() -> None:
+    runtime = remoter.Remoter.createemptyinstance()
+    runtime.remotedClasses = {}
+    funcargs = {"key": "unit/objgetattr", "loc": "direct"}
+
+    payload = runtime.encode_result(funcargs, None, AttributeError("value2x"), None)
+    _, _, ex = runtime.decode_result(payload, "direct", None)
+
+    assert type(ex) is AttributeError
+    assert str(ex) == "value2x"
+
+
 def test_send_result_returns_serialization_failure_to_client() -> None:
     class FakeMessenger:
         def __init__(self) -> None:

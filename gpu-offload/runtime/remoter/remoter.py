@@ -1835,7 +1835,10 @@ class Remoter:
         if ex_payload is None:
             ex = None
         elif isinstance(ex_payload, RemoteErrorDescriptor):
-            ex = RemoteExecutionError(ex_payload)
+            if ex_payload.type_name == "AttributeError":
+                ex = AttributeError(ex_payload.message)
+            else:
+                ex = RemoteExecutionError(ex_payload)
         else:
             ex = RemoteExecutionError(
                 RemoteErrorDescriptor(

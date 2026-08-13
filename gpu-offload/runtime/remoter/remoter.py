@@ -511,9 +511,7 @@ def initfields(x):
     x.remotedclasskey_rmt0bf = remotedclasskey[type(x)]
 
 
-nodehydrate = [
-    #    'remoter.rmtclass//_getfromremote'
-]
+nodehydrate = ["remoter.rmtclass//_getfromremote"]
 
 
 def setRemotedClassInCache(obj, remotedClasses: dict, callbackonCacheAdd: Callable | None) -> None:

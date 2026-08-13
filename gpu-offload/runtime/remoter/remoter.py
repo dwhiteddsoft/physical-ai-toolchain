@@ -498,7 +498,7 @@ _CODEC_REGISTRY.register_fallback(
         ext_code=18,
         py_type=object,
         encode=lambda obj, _context: class2dict.to_dict(obj),
-        decode=lambda payload, _context: class2dict.from_dict(payload),
+        decode=lambda payload, _context: class2dict.from_dict(payload, limits=_CODEC_LIMITS),
     )
 )
 

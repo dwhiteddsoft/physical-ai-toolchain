@@ -15,6 +15,8 @@ from datetime import date, datetime
 from threading import Lock
 from typing import Any
 
+from .safe_codec import CodecLimits, CodecLimitsError
+
 TYPE_KEY = "__type__"
 VALUE_KEY = "__value__"
 TENSOR_KEY = "__tensor__"
@@ -93,6 +95,18 @@ def _remember_unavailable_tensor_device(device: str) -> None:
             del _UNAVAILABLE_TENSOR_DEVICES[next(iter(_UNAVAILABLE_TENSOR_DEVICES))]
 
 
+def _tensor_byte_length(shape: list[int], itemsize: int, max_bytes_length: int) -> int:
+    max_numel = max_bytes_length // itemsize
+    numel = 1
+    for size in shape:
+        if size and numel > max_numel // size:
+            raise CodecLimitsError(f"tensor bytes exceed max_bytes_length={max_bytes_length}")
+        numel *= size
+    if numel > max_numel:
+        raise CodecLimitsError(f"tensor bytes exceed max_bytes_length={max_bytes_length}")
+    return numel * itemsize
+
+
 def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
     if not _is_torch_tensor_type(type(obj)):
         return None
@@ -116,7 +130,7 @@ def _tensor_to_dict(obj: Any) -> dict[str, Any] | None:
     }
 
 
-def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None) -> Any:
+def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None, limits: CodecLimits) -> Any:
     torch = _get_torch()
     if torch is None or not issubclass(target, torch.Tensor):
         raise TypeError(f"Cannot reconstruct tensor type {target!r}: PyTorch is not installed")
@@ -134,6 +148,9 @@ def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None) -> An
     data = payload.get("data")
     if not isinstance(data, bytes):
         raise TypeError("Tensor payload data must be bytes")
+    expected_bytes = _tensor_byte_length(shape, dtype.itemsize, limits.max_bytes_length)
+    if len(data) != expected_bytes:
+        raise TypeError(f"Tensor payload data length {len(data)} does not match expected length {expected_bytes}")
     source_device = payload.get("device", "cpu")
     if not isinstance(source_device, str):
         raise TypeError("Tensor payload device must be a string")
@@ -190,22 +207,29 @@ def to_dict(obj: Any) -> Any:
     return data
 
 
-def from_dict(data: Any, cls: type | None = None, *, device: Any | None = None) -> Any:
+def from_dict(
+    data: Any,
+    cls: type | None = None,
+    *,
+    device: Any | None = None,
+    limits: CodecLimits | None = None,
+) -> Any:
     """Rebuild an object on ``device``, or use the source device with CPU fallback."""
+    limits = limits or CodecLimits()
     if isinstance(data, _PRIMITIVES):
         return data
     if isinstance(data, list):
-        return [from_dict(item, device=device) for item in data]
+        return [from_dict(item, device=device, limits=limits) for item in data]
     if not isinstance(data, dict):
         return data
 
     if TYPE_KEY not in data and cls is None:
-        return {key: from_dict(value, device=device) for key, value in data.items()}
+        return {key: from_dict(value, device=device, limits=limits) for key, value in data.items()}
 
     target = cls if cls is not None else _resolve(data[TYPE_KEY])
 
     if TENSOR_KEY in data:
-        return _tensor_from_dict(target, data[TENSOR_KEY], device)
+        return _tensor_from_dict(target, data[TENSOR_KEY], device, limits)
 
     if VALUE_KEY in data:
         value = data[VALUE_KEY]
@@ -214,10 +238,10 @@ def from_dict(data: Any, cls: type | None = None, *, device: Any | None = None) 
         if isinstance(target, type) and issubclass(target, (datetime, date)):
             return target.fromisoformat(value)
         if isinstance(target, type) and issubclass(target, (tuple, set, frozenset)):
-            return target(from_dict(item, device=device) for item in value)
+            return target(from_dict(item, device=device, limits=limits) for item in value)
         return target(value)
 
-    payload = {k: from_dict(v, device=device) for k, v in data.items() if k != TYPE_KEY}
+    payload = {k: from_dict(v, device=device, limits=limits) for k, v in data.items() if k != TYPE_KEY}
 
     instance = object.__new__(target)
     for key, value in payload.items():

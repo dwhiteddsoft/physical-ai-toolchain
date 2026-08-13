@@ -12,10 +12,62 @@ from remoter.safe_codec import (
     CodecLimits,
     CodecLimitsError,
     CodecTypeError,
-    TypeAdapter,
     dumps,
     loads,
 )
+
+
+class _FakeDtype:
+    itemsize = 4
+
+
+class _FakeTensor:
+    def __init__(self) -> None:
+        self.device: str | None = None
+        self.shape: list[int] | None = None
+
+    def reshape(self, shape: list[int]) -> _FakeTensor:
+        self.shape = shape
+        return self
+
+    def to(self, device: str) -> _FakeTensor:
+        self.device = device
+        return self
+
+    def requires_grad_(self, _requires_grad: bool) -> _FakeTensor:
+        return self
+
+
+class _FakeTorch:
+    Tensor = _FakeTensor
+    dtype = _FakeDtype
+    float32 = _FakeDtype()
+    allocation_count = 0
+
+    @classmethod
+    def frombuffer(cls, _data: bytearray, *, dtype: _FakeDtype) -> _FakeTensor:
+        assert dtype is cls.float32
+        cls.allocation_count += 1
+        return _FakeTensor()
+
+    @classmethod
+    def empty(cls, shape: list[int], *, dtype: _FakeDtype) -> _FakeTensor:
+        assert dtype is cls.float32
+        cls.allocation_count += 1
+        return _FakeTensor().reshape(shape)
+
+
+def _tensor_wire_payload(*, data: bytes, shape: list[int]) -> dict[str, object]:
+    return {
+        class2dict.TYPE_KEY: "torch:Tensor",
+        class2dict.TENSOR_KEY: {
+            "data": data,
+            "device": "cpu",
+            "dtype": "float32",
+            "requires_grad": False,
+            "shape": shape,
+        },
+    }
 
 
 def test_safe_builtins_round_trip() -> None:
@@ -70,6 +122,36 @@ def test_class2dict_reconstruction_does_not_call_constructor() -> None:
 
     assert isinstance(decoded, ConstructorHasSideEffects)
     assert decoded.value == 7
+
+
+def test_class2dict_reconstructs_scalar_tensor_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(class2dict, "_get_torch", lambda: _FakeTorch)
+    _FakeTorch.allocation_count = 0
+
+    decoded = class2dict.from_dict(
+        _tensor_wire_payload(data=b"1234", shape=[]),
+        cls=_FakeTensor,
+        limits=CodecLimits(max_bytes_length=4),
+    )
+
+    assert isinstance(decoded, _FakeTensor)
+    assert decoded.shape == []
+    assert decoded.device == "cpu"
+    assert _FakeTorch.allocation_count == 1
+
+
+def test_class2dict_rejects_tensor_exceeding_codec_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(class2dict, "_get_torch", lambda: _FakeTorch)
+    _FakeTorch.allocation_count = 0
+
+    with pytest.raises(CodecLimitsError, match="tensor bytes exceed max_bytes_length=8"):
+        class2dict.from_dict(
+            _tensor_wire_payload(data=b"", shape=[3]),
+            cls=_FakeTensor,
+            limits=CodecLimits(max_bytes_length=8),
+        )
+
+    assert _FakeTorch.allocation_count == 0
 
 
 def test_unknown_type_fails_without_adapter_and_no_reduce_exec() -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import enum
 import importlib
+import sys
 import uuid
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
@@ -51,14 +52,13 @@ def _resolve(path: str) -> type:
         return registered_type
 
     module_name, _, qualname = path.partition(":")
-    try:
-        obj: Any = importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
+    obj: Any = sys.modules.get(module_name)
+    if obj is None:
         raise TypeError(
-            f"Cannot reconstruct class2dict type {path!r}: module {module_name!r} is not importable. "
-            "Install the defining module on this endpoint or register the local equivalent with "
+            f"Cannot reconstruct class2dict type {path!r}: module {module_name!r} is not loaded. "
+            "Load the defining module on this endpoint or register the local equivalent with "
             "remoter.register_class2dict_type(..., wire_name=<sender type name>)."
-        ) from exc
+        )
     for part in qualname.split("."):
         obj = getattr(obj, part)
     if not isinstance(obj, type):

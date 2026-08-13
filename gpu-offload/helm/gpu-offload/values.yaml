@@ -24,7 +24,7 @@ imagePullSecrets: []
 mutate:
   image:
     # -- Real image name consumed from `image.registry`.
-    repository: ""
+    repository: xavier-mutate
     # -- Leave `tag` empty and set `digest` to a sha256 pin for reproducible,
     # tamper-evident deploys (recommended). When `digest` is set it wins over `tag`.
     # Example: digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -34,6 +34,9 @@ mutate:
   webhookPort: 6443
   # Log verbosity for the mutate controller (error | warning | info | debug).
   logLevel: warning
+  # Host paths that may be copied from opted-in workloads to remote server deployments.
+  # Exact path matches only. An empty list denies all hostPath volumes.
+  allowedHostPaths: []
   # TLS mode options (choose one):
   # - certManager.enabled: true  -> use cert-manager Certificate (recommended for production)
   # - tls.secretName: <name>     -> use an existing `kubernetes.io/tls` Secret in this namespace

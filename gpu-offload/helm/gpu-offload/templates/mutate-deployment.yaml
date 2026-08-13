@@ -137,6 +137,8 @@ spec:
               value: {{ .Values.mutate.logLevel | quote }}
             - name: LOGLEVEL
               value: {{ .Values.mutate.logLevel | quote }}
+            - name: ALLOWED_SERVER_HOST_PATHS
+              value: {{ .Values.mutate.allowedHostPaths | toJson | quote }}
       {{- with .Values.mutateScheduling.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

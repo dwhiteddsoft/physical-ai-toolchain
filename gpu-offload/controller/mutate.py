@@ -5,6 +5,7 @@ import base64
 import copy
 import json
 import logging
+import os
 import signal
 import ssl
 import threading
@@ -33,6 +34,7 @@ REMOTE_CONFIG_PATH = f"{XAVIER_CONFIG_MOUNT_PATH}/remote.yaml"
 DEFAULT_TLS_CERT_PATH = "/tls/tls.crt"
 DEFAULT_TLS_KEY_PATH = "/tls/tls.key"
 DEFAULT_PORT = 8443
+ALLOWED_SERVER_HOST_PATHS_ENV = "ALLOWED_SERVER_HOST_PATHS"
 
 READINESS_PROBE = {
     "exec": {"command": ["cat", "/ready.txt"]},
@@ -480,7 +482,23 @@ def _volume_lookup(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {volume.get("name"): volume for volume in spec.get("volumes", []) or [] if volume.get("name")}
 
 
-def _volume_is_allowed_for_server(volume: dict[str, Any]) -> bool:
+def _allowed_server_host_paths() -> set[str]:
+    raw = os.getenv(ALLOWED_SERVER_HOST_PATHS_ENV, "[]")
+    try:
+        configured_paths = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise XavierConfigError(f"{ALLOWED_SERVER_HOST_PATHS_ENV} must be a JSON list of paths") from exc
+    if not isinstance(configured_paths, list) or not all(
+        isinstance(path, str) and path.startswith("/") for path in configured_paths
+    ):
+        raise XavierConfigError(f"{ALLOWED_SERVER_HOST_PATHS_ENV} must be a JSON list of absolute paths")
+    return set(configured_paths)
+
+
+def _volume_is_allowed_for_server(volume: dict[str, Any], allowed_host_paths: set[str]) -> bool:
+    if "hostPath" in volume:
+        host_path = volume.get("hostPath")
+        return isinstance(host_path, dict) and host_path.get("path") in allowed_host_paths
     return any(key in volume for key in ALLOWED_SERVER_VOLUME_TYPES)
 
 
@@ -490,12 +508,13 @@ def copy_allowed_volumes_and_mounts(
     from_container: dict[str, Any],
 ) -> None:
     source_volumes = _volume_lookup(source_spec)
+    allowed_host_paths = _allowed_server_host_paths()
     mount_names = {mount.get("name") for mount in from_container.get("volumeMounts", []) or [] if mount.get("name")}
     destination_volumes = destination_spec.setdefault("volumes", [])
     existing_volume_names = {volume.get("name") for volume in destination_volumes}
     for mount_name in mount_names:
         source_volume = source_volumes.get(mount_name)
-        if source_volume is None or not _volume_is_allowed_for_server(source_volume):
+        if source_volume is None or not _volume_is_allowed_for_server(source_volume, allowed_host_paths):
             continue
         if mount_name not in existing_volume_names:
             destination_volumes.append(copy.deepcopy(source_volume))

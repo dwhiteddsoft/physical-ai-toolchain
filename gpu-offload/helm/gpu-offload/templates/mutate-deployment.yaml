@@ -109,7 +109,7 @@ spec:
           image: {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.mutate.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
-            - /usr/bin/python3
+            - /usr/local/bin/python3
             - /app/mutate.py
             - --port
             - {{ .Values.mutate.webhookPort | quote }}
@@ -137,6 +137,8 @@ spec:
               value: {{ .Values.mutate.logLevel | quote }}
             - name: LOGLEVEL
               value: {{ .Values.mutate.logLevel | quote }}
+            - name: ALLOWED_SERVER_HOST_PATHS
+              value: {{ .Values.mutate.allowedHostPaths | toJson | quote }}
       {{- with .Values.mutateScheduling.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -394,8 +394,9 @@ def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, stri
         changed = False
         for container in _all_containers(spec):
             if _has_xavier_env(container):
-                pod_name = metadata.get("name", "unknown")
-                changed |= set_env_var_if_not_exists(container, "PERCLIENTSERVERLABEL", getserverlabel(pod_name))
+                pod_name = metadata.get("name")
+                perclient_label = getserverlabel(pod_name) if pod_name else "unknown"
+                changed |= set_env_var_if_not_exists(container, "PERCLIENTSERVERLABEL", perclient_label)
         return changed
 
     if xaviercfg is None:

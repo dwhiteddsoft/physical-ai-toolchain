@@ -9,8 +9,17 @@ imagePullSecrets: []
 
 serverStage:
   name: cpu
-  wslNvidia:
+  # Server-stage image. Leave the repository empty to reuse the client image.
+  # The GPU check uses a separate torch-CUDA image so the client stays slim and
+  # genuinely has no GPU support of its own.
+  image:
+    repository: ""
+    tag: ""
+  gpu:
     enabled: false
+    # wsl-nvidia reaches the GPU through /dev/dxg and the mounted Windows driver
+    # tree; baremetal-nvidia uses the standard NVIDIA container stack.
+    platform: baremetal-nvidia
     resourceName: nvidia.com/gpu
     quantity: "1"
     driverLibraryPath: /usr/lib/wsl/lib

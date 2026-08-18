@@ -9,11 +9,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY gpu-offload/runtime /runtime
+COPY runtime /runtime
 RUN uv venv --seed /opt/venv && \
 	uv pip install --python /opt/venv/bin/python /runtime
 
-COPY gpu-offload/examples/first-run/client.py /app/client.py
-COPY gpu-offload/examples/first-run/demo_model.py /app/demo_model.py
+COPY examples/first-run/client.py /app/client.py
+COPY examples/first-run/demo_model.py /app/demo_model.py
+COPY examples/first-run/gpu_model.py /app/gpu_model.py
 
 CMD ["python3", "/app/client.py"]

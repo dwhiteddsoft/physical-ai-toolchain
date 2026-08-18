@@ -1,18 +1,15 @@
+# EXAMPLE FOR USING AN ALTERNATIVE PYTHON FEED WITH ASTRAL UV
 FROM python:3.12-slim
-
-ARG PIP_INDEX_URL
 
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install Python deps only (no apt-get, no runtime installs)
-RUN pip install --no-cache-dir kubernetes==34.1.0 PyYAML==6.0.2
+RUN --mount=type=secret,id=PIP_INDEX_URL,env=PIP_INDEX_URL \
+	pip install --no-cache-dir kubernetes==34.1.0 PyYAML==6.0.2
 
-# Copy controller code
 COPY . /app
 
-# Run as non-root
 RUN adduser --disabled-password --gecos "" appuser || true
 USER appuser
 

@@ -29,7 +29,7 @@ T0 is the documented **default** starting path. T2 is the **recommended producti
 
 | T# | Stage name | Operator reach / scope                   | Edge infra              | Cloud infra                                          | One-line purpose                                                             |
 |----|------------|------------------------------------------|-------------------------|------------------------------------------------------|------------------------------------------------------------------------------|
-| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker only     | None                                                 | The honest zero-cloud, zero-Kubernetes floor for the full training lifecycle.                       |
+| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker; optional local Kubernetes | None                                      | The honest zero-cloud floor for the full lifecycle; Kubernetes is never required.                   |
 | T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob storage account (optional AzureML / MLflow) | Add the first cloud resource, storage, for a small lab or integrator.        |
 | T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker      | AzureML + storage + model registry + MLflow          | Cloud training, registry, and shared catalogs become the default.            |
 | T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD      | Same as T2 (no Arc)                                  | GitOps deployment automation at one site, proving Arc is not required.       |
@@ -38,7 +38,8 @@ T0 is the documented **default** starting path. T2 is the **recommended producti
 
 **Full training lifecycle** (the anchor goal): capture demonstrations on a robot, train an imitation policy, validate
 it, and run that policy back on the robot, the full loop for one task. The full training lifecycle is fully achievable at
-T0-T2 with manual deployment and no Kubernetes, Arc, or fleet infrastructure. Data augmentation is a
+T0-T2 with manual deployment and no required Kubernetes, Arc, or fleet infrastructure. T0 may use a
+single-laptop Kubernetes cluster as an optional local orchestration profile. Data augmentation is a
 separate optional axis (A0-A2), not a step in the full training lifecycle.
 
 ### Boundaries

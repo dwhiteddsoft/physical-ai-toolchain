@@ -1,0 +1,791 @@
+# mise tasks for the gpu-offload domain.
+#
+# Run every task from this directory:
+#
+#   cd gpu-offload
+#   mise trust
+#   mise run detect
+#   mise run setup
+#
+# Tasks resolve the target platform and cluster runtime through
+# scripts/detect-platform.sh. Copy .env.example to .env to override detection.
+
+[env]
+# Optional; absent files are ignored. Values here override auto-detection and
+# supply machine-local settings such as a private Python package index.
+_.file = ".env"
+
+# Reference for hosts that must build through an internal package proxy rather
+# than the public registries. Uncomment here, or set the same variables in .env
+# to keep them out of version control. The build tasks forward PIP_INDEX_URL and
+# UV_INDEX_URL to Podman only when they are set, so leaving these commented out
+# keeps public PyPI as the default on an unproxied machine.
+#
+# PIP_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+# UV_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+# npm_config_registry = "https://packagefeedproxy.microsoft.io/npm/"
+
+# ==============================================================================
+# Resolution
+# ==============================================================================
+
+[tasks."detect"]
+description = "Show the resolved platform, cluster runtime, and cluster identifiers"
+run = "scripts/detect-platform.sh"
+
+[tasks."env-init"]
+description = "Create .env from .env.example when it does not exist"
+run = '''
+if [ -f .env ]; then
+  echo ".env already exists; leaving it unchanged"
+else
+  cp .env.example .env
+  echo "Created .env from .env.example"
+fi
+'''
+
+# ==============================================================================
+# Host preparation
+# ==============================================================================
+
+[tasks."host-01-packages"]
+description = "Install the Ubuntu host packages required for local Kubernetes"
+run = '''
+sudo apt-get update
+sudo apt-get install --yes curl jq podman uidmap
+'''
+
+[tasks."host-02-kubernetes-tools"]
+description = "Install the pinned kind, kubectl, and Helm versions with mise"
+run = "mise use --global kind@0.30.0 kubectl@1.35.1 helm@3.21.3"
+
+[tasks."host-03-nvidia-toolkit"]
+description = "Install NVIDIA Container Toolkit and generate the CDI specification"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+# pinning-ignore: keyring for a GPG-signed apt repository, no stable digest
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor --yes \
+  --output /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+# pinning-ignore: apt source list carrying only repository URLs
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
+sudo apt-get update
+sudo apt-get install --yes nvidia-container-toolkit
+sudo mkdir -p /etc/cdi
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+nvidia-ctk cdi list
+'''
+
+[tasks."host-04-nvidia-verify"]
+description = "Verify host and container runtime NVIDIA access"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+nvidia-smi
+case "$GPU_OFFLOAD_PLATFORM" in
+  wsl-nvidia)       test -c /dev/dxg ;;
+  baremetal-nvidia) test -c /dev/nvidiactl ;;
+esac
+
+# On WSL, Podman is how the GPU reaches the kind node, so a failure here is
+# fatal. On bare metal, k3s uses its own containerd and the NVIDIA runtime
+# handler, so this only diagnoses the host toolkit and must not block setup.
+if podman run --rm \
+  --security-opt=label=disable \
+  --device nvidia.com/gpu=all \
+  docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04 \
+  nvidia-smi; then
+  echo "Podman GPU access verified"
+elif [ "$GPU_OFFLOAD_RUNTIME" = "kind" ]; then
+  echo "Podman cannot reach the GPU, which the kind path requires" >&2
+  exit 1
+else
+  echo "WARNING: Podman cannot reach the GPU; k3s uses containerd directly, continuing" >&2
+fi
+'''
+
+[tasks."host-10-preflight"]
+description = "Check local tools and render the GPU offload Helm chart"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+kubectl version --client
+helm version
+# Podman builds the workload images on every platform. Its rootless and runtime
+# configuration only matters for kind, where Podman also hosts the node.
+podman --version
+if [ "$GPU_OFFLOAD_RUNTIME" = "kind" ]; then
+  kind version
+  podman info --format '{{ "{{" }}.Host.Security.Rootless{{ "}}" }} {{ "{{" }}.Host.OCIRuntime.Name{{ "}}" }}'
+fi
+helm template gpu-offload helm/gpu-offload \
+  --namespace gpu-offload \
+  --set image.registry=localhost >/dev/null
+echo "Preflight checks passed"
+'''
+
+# ==============================================================================
+# Cluster lifecycle
+# ==============================================================================
+
+[tasks."cluster-00-list"]
+description = "List the local clusters for the resolved runtime"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  systemctl is-active k3s || echo "k3s is not running"
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get nodes -o wide 2>/dev/null || true
+else
+  KIND_EXPERIMENTAL_PROVIDER=podman kind get clusters
+  podman ps --all --filter label=io.x-k8s.kind.cluster
+fi
+'''
+
+[tasks."cluster-20-create"]
+description = "Create the cluster for the resolved platform and runtime"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  scripts/install-k3s.sh --context "$GPU_OFFLOAD_KUBE_CONTEXT"
+  exit 0
+fi
+
+config_file="$(mktemp --suffix=-gpu-offload-kind.yaml)"
+trap 'rm -f "$config_file"' EXIT
+
+if [ "$GPU_OFFLOAD_PLATFORM" = "wsl-nvidia" ]; then
+  test -c /dev/dxg
+  test -d /usr/lib/wsl
+  cat >"$config_file" <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: /dev/dxg
+        containerPath: /dev/dxg
+      - hostPath: /usr/lib/wsl
+        containerPath: /usr/lib/wsl
+        readOnly: true
+EOF
+else
+  cat >"$config_file" <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+EOF
+fi
+
+KIND_EXPERIMENTAL_PROVIDER=podman kind create cluster \
+  --name "$GPU_OFFLOAD_CLUSTER_NAME" \
+  --image kindest/node:v1.35.0 \
+  --config="$config_file"
+kubectl config use-context "$GPU_OFFLOAD_KUBE_CONTEXT"
+kubectl wait \
+  --for=condition=Ready \
+  "node/${GPU_OFFLOAD_CLUSTER_NAME}-control-plane" \
+  --timeout=180s
+'''
+
+[tasks."cluster-21-check"]
+description = "Run container and Kubernetes CPU smoke checks"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete pod/cpu-check --ignore-not-found >/dev/null
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" run cpu-check \
+  --image=docker.io/library/alpine:3.22 \
+  --restart=Never \
+  --command -- sh -c 'uname -m; echo Kubernetes CPU pod works'
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait pod/cpu-check \
+  --for=jsonpath='{.status.phase}'=Succeeded \
+  --timeout=180s
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs pod/cpu-check
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete pod/cpu-check
+'''
+
+[tasks."cluster-30-gpu-enable"]
+description = "Expose the GPU to the cluster for the resolved platform"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  scripts/configure-k3s-nvidia.sh --context "$GPU_OFFLOAD_KUBE_CONTEXT"
+  exit 0
+fi
+
+node="${GPU_OFFLOAD_CLUSTER_NAME}-control-plane"
+
+# kind's node containerd reads its OCI base spec at startup, so the read-only
+# WSL driver tree must be added there before any GPU pod starts.
+podman exec "$node" sh -c \
+  'jq '\''if any(.mounts[]; .destination == "/usr/lib/wsl") then . else .mounts += [{"destination":"/usr/lib/wsl","type":"none","source":"/usr/lib/wsl","options":["rbind","ro","nosuid","nodev"]}] end'\'' /etc/containerd/cri-base.json > /etc/containerd/cri-base.json.new && mv /etc/containerd/cri-base.json.new /etc/containerd/cri-base.json'
+podman exec "$node" systemctl restart containerd
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait \
+  --for=condition=Ready "node/$node" --timeout=180s
+
+archive="$(mktemp --suffix=-generic-device-plugin.tar)"
+trap 'rm -f "$archive"' EXIT
+podman pull docker.io/squat/generic-device-plugin:0.2.0
+podman save --output "$archive" docker.io/squat/generic-device-plugin:0.2.0
+KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive "$archive" \
+  --name "$GPU_OFFLOAD_CLUSTER_NAME"
+
+# NVML is unavailable in nested WSL2, so a generic device plugin advertises
+# /dev/dxg as nvidia.com/gpu instead of NVIDIA's own plugin.
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: wsl-gpu-device-plugin
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: wsl-gpu-device-plugin
+  template:
+    metadata:
+      labels:
+        app: wsl-gpu-device-plugin
+    spec:
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: device-plugin
+          image: docker.io/squat/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff
+          imagePullPolicy: IfNotPresent
+          args:
+            - --domain=nvidia.com
+            - --device={"name":"gpu","groups":[{"paths":[{"path":"/dev/dxg"}]}]}
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dxg
+              mountPath: /dev/dxg
+      volumes:
+        - name: device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dxg
+          hostPath:
+            path: /dev/dxg
+            type: CharDevice
+EOF
+
+rollout_timeout="${GPU_PLUGIN_ROLLOUT_TIMEOUT:-600}"
+register_timeout="${GPU_PLUGIN_REGISTER_TIMEOUT:-600}"
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status \
+  daemonset/wsl-gpu-device-plugin \
+  --namespace kube-system \
+  --timeout="${rollout_timeout}s"
+
+# The rollout completes once the pod is Running, but kubelet only publishes
+# nvidia.com/gpu after the plugin registers over its gRPC socket.
+elapsed=0
+while :; do
+  gpu_allocatable="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get node "$node" \
+    -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null || true)"
+  if [ "$gpu_allocatable" = "1" ]; then
+    break
+  fi
+  if [ "$elapsed" -ge "$register_timeout" ]; then
+    echo "Timed out waiting for nvidia.com/gpu; found: ${gpu_allocatable:-none}" >&2
+    kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs --namespace kube-system \
+      --selector app=wsl-gpu-device-plugin --tail=50 >&2 || true
+    exit 1
+  fi
+  echo "Waiting for the device plugin to register nvidia.com/gpu (${elapsed}s/${register_timeout}s)..."
+  sleep 5
+  elapsed=$((elapsed + 5))
+done
+
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get nodes \
+  -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
+'''
+
+[tasks."cluster-31-gpu-check"]
+description = "Run a GPU-allocated Kubernetes smoke check"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+node="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get nodes -o jsonpath='{.items[0].metadata.name}')"
+gpu_allocatable="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get node "$node" \
+  -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
+if [ -z "$gpu_allocatable" ] || [ "$gpu_allocatable" = "0" ]; then
+  echo "No allocatable NVIDIA GPU; run: mise run cluster-30-gpu-enable" >&2
+  exit 1
+fi
+echo "Allocatable nvidia.com/gpu: $gpu_allocatable"
+
+cleanup() {
+  exit_code=$?
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete pod/gpu-check --ignore-not-found >/dev/null
+  exit "$exit_code"
+}
+trap cleanup EXIT
+
+if [ "$GPU_OFFLOAD_PLATFORM" = "wsl-nvidia" ]; then
+  archive="$(mktemp --suffix=-nvidia-cuda.tar)"
+  podman pull docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+  podman save --output "$archive" docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive "$archive" \
+    --name "$GPU_OFFLOAD_CLUSTER_NAME"
+  rm -f "$archive"
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-check
+spec:
+  restartPolicy: Never
+  containers:
+    - name: cuda
+      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          driver_dir=$(find /usr/lib/wsl/drivers -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${driver_dir}"
+          test -c /dev/dxg
+          /usr/lib/wsl/lib/nvidia-smi
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+EOF
+else
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-check
+spec:
+  restartPolicy: Never
+  containers:
+    - name: cuda
+      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+      command: ["nvidia-smi"]
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+EOF
+fi
+
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait pod/gpu-check \
+  --for=jsonpath='{.status.phase}'=Succeeded \
+  --timeout=300s
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs pod/gpu-check
+'''
+
+[tasks."cluster-70-start"]
+description = "Start the stopped cluster for the resolved runtime"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  sudo systemctl start k3s
+else
+  podman start "${GPU_OFFLOAD_CLUSTER_NAME}-control-plane"
+  kubectl config use-context "$GPU_OFFLOAD_KUBE_CONTEXT"
+fi
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait \
+  --for=condition=Ready node --all --timeout=180s
+'''
+
+[tasks."cluster-80-stop"]
+description = "Stop the cluster without deleting it"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  sudo systemctl stop k3s
+else
+  podman stop "${GPU_OFFLOAD_CLUSTER_NAME}-control-plane"
+fi
+'''
+
+[tasks."cluster-81-service-enable"]
+description = "Start k3s on boot (bare-metal k3s only)"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" != "k3s" ]; then
+  echo "Runtime is $GPU_OFFLOAD_RUNTIME; boot control applies to k3s only"
+  exit 0
+fi
+sudo systemctl enable k3s
+
+boot="$(systemctl is-enabled k3s 2>/dev/null || true)"
+state="$(systemctl is-active k3s 2>/dev/null || true)"
+echo "Service:        k3s"
+echo "Start on boot:  ${boot:-unknown}"
+echo "Current state:  ${state:-inactive}"
+'''
+
+[tasks."cluster-82-service-disable"]
+description = "Stop k3s from starting on boot, leaving it installed (bare-metal k3s only)"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" != "k3s" ]; then
+  echo "Runtime is $GPU_OFFLOAD_RUNTIME; boot control applies to k3s only"
+  exit 0
+fi
+sudo systemctl disable k3s
+
+boot="$(systemctl is-enabled k3s 2>/dev/null || true)"
+state="$(systemctl is-active k3s 2>/dev/null || true)"
+echo "Service:        k3s"
+echo "Start on boot:  ${boot:-disabled}"
+echo "Current state:  ${state:-inactive}"
+'''
+
+[tasks."cluster-90-delete"]
+description = "Delete the cluster for the resolved runtime"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+  if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+    sudo /usr/local/bin/k3s-uninstall.sh
+  else
+    echo "k3s is not installed"
+  fi
+  kubectl config delete-context "$GPU_OFFLOAD_KUBE_CONTEXT" >/dev/null 2>&1 || true
+  kubectl config delete-cluster "$GPU_OFFLOAD_KUBE_CONTEXT" >/dev/null 2>&1 || true
+  kubectl config delete-user "$GPU_OFFLOAD_KUBE_CONTEXT" >/dev/null 2>&1 || true
+else
+  KIND_EXPERIMENTAL_PROVIDER=podman kind delete cluster --name "$GPU_OFFLOAD_CLUSTER_NAME"
+fi
+'''
+
+# ==============================================================================
+# Offload workload
+# ==============================================================================
+
+[tasks."offload-40-build-images"]
+description = "Build the controller, client, and GPU server images with Podman"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+
+build_args=""
+if [ -n "${PIP_INDEX_URL:-}" ]; then
+  build_args="--build-arg PIP_INDEX_URL=$PIP_INDEX_URL"
+fi
+
+# shellcheck disable=SC2086
+podman build $build_args \
+  --file controller/Containerfile \
+  --tag localhost/xavier-mutate:local \
+  controller
+
+uv_args=""
+if [ -n "${UV_INDEX_URL:-}" ]; then
+  uv_args="--build-arg UV_INDEX_URL=$UV_INDEX_URL"
+fi
+
+# shellcheck disable=SC2086
+podman build $uv_args \
+  --file examples/first-run/Containerfile \
+  --tag localhost/gpu-offload-first-run:local \
+  .
+podman image exists localhost/xavier-mutate:local
+podman image exists localhost/gpu-offload-first-run:local
+
+if [ "$GPU_OFFLOAD_GPU_ENABLED" = "true" ]; then
+  # shellcheck disable=SC2086
+  podman build $uv_args \
+    --file examples/first-run/Containerfile.gpu \
+    --tag localhost/gpu-offload-first-run-gpu:local \
+    .
+  podman image exists localhost/gpu-offload-first-run-gpu:local
+fi
+'''
+
+[tasks."offload-41-load-images"]
+description = "Load the offload images into the resolved cluster"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+
+images="localhost/xavier-mutate:local localhost/gpu-offload-first-run:local"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" = "true" ]; then
+  images="$images localhost/gpu-offload-first-run-gpu:local"
+fi
+
+for image in $images; do
+  archive="$(mktemp --suffix=-gpu-offload-image.tar)"
+  podman save --output "$archive" "$image"
+  if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
+    sudo k3s ctr images import "$archive"
+  else
+    KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive "$archive" \
+      --name "$GPU_OFFLOAD_CLUSTER_NAME"
+  fi
+  rm -f "$archive"
+  echo "Loaded $image"
+done
+'''
+
+[tasks."offload-43-install-controller"]
+description = "Install the admission controller in the resolved cluster"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" upgrade --install gpu-offload helm/gpu-offload \
+  --namespace gpu-offload \
+  --create-namespace \
+  --set image.registry=localhost \
+  --set mutate.image.repository=xavier-mutate \
+  --set mutate.image.tag=local \
+  --set image.pullPolicy=Never
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status deployment/gpu-offload-mutate \
+  --namespace gpu-offload \
+  --timeout=180s
+'''
+
+[tasks."offload-50-deploy"]
+description = "Deploy the first-offload client and its server stage"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+
+set -- --set image.registry=localhost --set "serverStage.name=$GPU_OFFLOAD_STAGE"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" = "true" ]; then
+  # torch and a CUDA context need far more headroom than the CPU stage default.
+  set -- "$@" \
+    --set serverStage.gpu.enabled=true \
+    --set "serverStage.gpu.platform=$GPU_OFFLOAD_PLATFORM" \
+    --set serverStage.image.repository=gpu-offload-first-run-gpu \
+    --set serverStage.resources.requests.cpu=500m \
+    --set serverStage.resources.requests.memory=2Gi \
+    --set serverStage.resources.limits.cpu=4 \
+    --set serverStage.resources.limits.memory=8Gi
+fi
+
+helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" upgrade --install first-run examples/first-run \
+  --namespace gpu-offload-demo \
+  --create-namespace \
+  "$@"
+
+server="first-run-client-remote-server-${GPU_OFFLOAD_STAGE}"
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait --for=create \
+  "deployment/$server" \
+  --namespace gpu-offload-demo \
+  --timeout=180s
+# The local image tag is mutable, so rebuilding the server image does not change
+# the pod spec and the running stage would keep serving the previous code.
+# An exclusive GPU cannot be surged: the replacement pod stays Pending on
+# "Insufficient nvidia.com/gpu" until the outgoing pod releases the device, so
+# the GPU stage must replace rather than roll.
+if [ "$GPU_OFFLOAD_GPU_ENABLED" = "true" ]; then
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" patch "deployment/$server" \
+    --namespace gpu-offload-demo \
+    --type=merge \
+    --patch '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+fi
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout restart "deployment/$server" \
+  --namespace gpu-offload-demo
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status "deployment/$server" \
+  --namespace gpu-offload-demo \
+  --timeout=600s
+
+# Remove a server stage left behind by a previous platform before restarting
+# the client, so the client reconnects to the stage it is configured for.
+for stale in cpu nvidia; do
+  if [ "$stale" != "$GPU_OFFLOAD_STAGE" ]; then
+    kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete deployment \
+      "first-run-client-remote-server-${stale}" \
+      --namespace gpu-offload-demo --ignore-not-found
+  fi
+done
+
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout restart deployment/first-run-client \
+  --namespace gpu-offload-demo
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status deployment/first-run-client \
+  --namespace gpu-offload-demo \
+  --timeout=300s
+'''
+
+[tasks."offload-51-check-execution"]
+description = "Verify that the remoted function executed on the server stage"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+server="first-run-client-remote-server-${GPU_OFFLOAD_STAGE}"
+
+result=""
+i=0
+while [ "$i" -lt 30 ]; do
+  result="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs deployment/first-run-client \
+    --namespace gpu-offload-demo 2>/dev/null | grep '"executed_by"' | grep -v '"gpu_check"' | tail -n 1 || true)"
+  [ -n "$result" ] && break
+  sleep 5
+  i=$((i + 1))
+done
+test -n "$result"
+printf '%s\n' "$result"
+
+RESULT="$result" SERVER="$server" python3 - <<'PY'
+import json
+import os
+
+result = json.loads(os.environ["RESULT"])
+assert result["executed_by"].startswith(os.environ["SERVER"] + "-"), result["executed_by"]
+assert result["predictions"] == [1, 4, 9, 16], result["predictions"]
+print("Remote execution verified on", result["executed_by"])
+PY
+'''
+
+[tasks."offload-61-check-gpu-allocation"]
+description = "Verify that only the server stage holds a GPU allocation"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+server="first-run-client-remote-server-${GPU_OFFLOAD_STAGE}"
+server_gpu="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get "deployment/$server" \
+  --namespace gpu-offload-demo \
+  --output jsonpath='{.spec.template.spec.containers[0].resources.limits.nvidia\.com/gpu}')"
+client_gpu="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" get deployment/first-run-client \
+  --namespace gpu-offload-demo \
+  --output jsonpath='{.spec.template.spec.containers[0].resources.limits.nvidia\.com/gpu}')"
+
+test "$server_gpu" = "1"
+test -z "$client_gpu"
+echo "Server GPU limit: $server_gpu"
+echo "Client GPU limit: ${client_gpu:-none}"
+'''
+
+[tasks."offload-62-check-gpu-model"]
+description = "Verify that the offloaded model ran on the GPU and the client has none"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
+  echo "Platform $GPU_OFFLOAD_PLATFORM does not use a GPU; skipping"
+  exit 0
+fi
+
+server="first-run-client-remote-server-${GPU_OFFLOAD_STAGE}"
+result=""
+i=0
+while [ "$i" -lt 60 ]; do
+  result="$(kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" logs deployment/first-run-client \
+    --namespace gpu-offload-demo 2>/dev/null | grep '"gpu_check"' | tail -n 1 || true)"
+  [ -n "$result" ] && break
+  sleep 5
+  i=$((i + 1))
+done
+test -n "$result"
+
+RESULT="$result" SERVER="$server" python3 - <<'PY'
+import json
+import os
+
+report = json.loads(os.environ["RESULT"])
+check = report["gpu_check"]
+server = os.environ["SERVER"]
+
+print(json.dumps(report, indent=2, sort_keys=True))
+
+assert "error" not in check, check["error"]
+assert check["executed_by"].startswith(server + "-"), check["executed_by"]
+assert check["cuda_available"] is True, "CUDA was not available on the server stage"
+assert check["device_type"] == "cuda", check["device_type"]
+assert check["logits_device"].startswith("cuda"), check["logits_device"]
+assert check["cuda_device_count"] >= 1, check["cuda_device_count"]
+
+# The GPU forward pass must agree with the identical seeded CPU model, proving
+# the device produced correct results rather than uninitialised memory.
+assert check["max_abs_diff_vs_cpu"] < 1e-3, check["max_abs_diff_vs_cpu"]
+assert check["peak_memory_mib"] > 0, check["peak_memory_mib"]
+
+# Negative control: the same code path reports a GPU only because it was
+# offloaded. The client itself must see no GPU device at all.
+assert report["client_gpu_devices"] == [], report["client_gpu_devices"]
+assert report["client_host"] != check["executed_by"], "client and server are the same pod"
+
+print()
+print("GPU model check passed")
+print("  executed on      :", check["executed_by"], "/", check["device_name"])
+print("  compute capability:", check["compute_capability"])
+print("  torch / cuda      :", check["torch_version"], "/", check["cuda_runtime_version"])
+print("  forward / matmul  :", check["forward_ms"], "ms /", check["matmul_ms"], "ms")
+print("  max diff vs cpu   :", check["max_abs_diff_vs_cpu"])
+print("  client host       :", report["client_host"], "(no GPU devices)")
+PY
+'''
+
+[tasks."offload-90-teardown"]
+description = "Remove the offload workloads and demo state from the cluster"
+run = '''
+eval "$(scripts/detect-platform.sh --export)"
+helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" uninstall first-run \
+  --namespace gpu-offload-demo --ignore-not-found
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete namespace gpu-offload-demo --ignore-not-found
+helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" uninstall gpu-offload \
+  --namespace gpu-offload --ignore-not-found
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete namespace gpu-offload --ignore-not-found
+
+# The generated server Deployment holds the GPU, so confirm the device is free
+# again before a follow-up run schedules a new stage.
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait --for=delete \
+  namespace/gpu-offload-demo --timeout=180s >/dev/null 2>&1 || true
+echo "Offload workloads removed; the cluster is still running"
+'''
+
+# ==============================================================================
+# Orchestration
+# ==============================================================================
+
+[tasks."setup"]
+description = "Run the full setup sequence for the resolved platform"
+run = '''
+scripts/detect-platform.sh
+mise run host-10-preflight
+mise run cluster-20-create
+mise run cluster-21-check
+mise run cluster-30-gpu-enable
+mise run cluster-31-gpu-check
+mise run offload-40-build-images
+mise run offload-41-load-images
+mise run offload-43-install-controller
+mise run offload-50-deploy
+'''
+
+[tasks."verify"]
+description = "Run every check for the resolved platform"
+run = '''
+mise run offload-51-check-execution
+mise run offload-61-check-gpu-allocation
+mise run offload-62-check-gpu-model
+'''
+
+[tasks."teardown"]
+description = "Remove the offload workloads, leaving the cluster installed"
+run = '''
+mise run offload-90-teardown
+'''
+
+[tasks."teardown-all"]
+description = "Remove the offload workloads and delete the cluster entirely"
+run = '''
+mise run offload-90-teardown
+mise run cluster-90-delete
+'''

@@ -1,13 +1,61 @@
 ---
-title: Local Podman and kind Setup
-description: Prepare a Podman-backed kind cluster for CPU-only or WSL NVIDIA GPU offload verification
-ms.date: 2026-08-11
+title: Local Kubernetes Setup for GPU Offload
+description: Prepare a kind or k3s cluster for CPU-only, WSL NVIDIA, or bare-metal NVIDIA GPU offload verification
+ms.date: 2026-08-18
 ms.topic: get-started
 ---
 
-<!-- cspell:ignore crun -->
+<!-- cspell:ignore crun userns -->
 
-Prepare a rootless Podman-backed kind cluster for the first GPU-offload run. Use the CPU path on any Linux host or the NVIDIA path in WSL2 with a GPU exposed through `/dev/dxg`. Reference numbers correspond to optional local automation while every command remains standalone.
+Prepare a local cluster for the first GPU-offload run. Three paths are supported:
+
+| Path              | Cluster runtime | Use when                                                    |
+|-------------------|-----------------|-------------------------------------------------------------|
+| CPU only          | kind + Podman   | Any Linux host, or to force CPU on a machine that has a GPU |
+| WSL NVIDIA        | kind + Podman   | WSL2 with a GPU exposed through `/dev/dxg`                  |
+| Bare-metal NVIDIA | k3s             | Native Linux with an NVIDIA driver and `/dev/nvidia*`       |
+
+Bare-metal NVIDIA uses k3s rather than kind because kind runs the Kubernetes node as a container, which would require passing the GPU through twice. k3s runs on the host, so GPU access is the ordinary documented case.
+
+Every command below remains standalone. The `mise` tasks in `gpu-offload/mise.toml` automate the same sequence and select the correct path automatically.
+
+## Run the Automated Path
+
+Run all tasks from the `gpu-offload` directory:
+
+```bash
+cd gpu-offload
+mise trust
+mise run detect
+mise run setup
+mise run verify
+```
+
+`mise run detect` prints the resolved platform before anything changes:
+
+```text
+Platform:          baremetal-nvidia (auto-detected)
+Cluster runtime:   k3s (auto-detected)
+GPU enabled:       true
+Server stage:      nvidia
+Cluster name:      gpu-offload-k3s
+Kube context:      gpu-offload-k3s
+```
+
+### Override Auto-Detection
+
+Auto-detection is skipped for any value set in `gpu-offload/.env`. Create one to force a path, such as running CPU on a machine that has a working GPU:
+
+```bash
+cp .env.example .env
+```
+
+| Variable               | Values                                  | Effect                     |
+|------------------------|-----------------------------------------|----------------------------|
+| `GPU_OFFLOAD_PLATFORM` | `cpu`, `wsl-nvidia`, `baremetal-nvidia` | Forces the platform path   |
+| `GPU_OFFLOAD_RUNTIME`  | `kind`, `k3s`                           | Forces the cluster runtime |
+
+Setting `GPU_OFFLOAD_PLATFORM=cpu` selects the kind CPU path and skips all GPU configuration, even when a GPU is present.
 
 ## Clone the Repository
 
@@ -337,6 +385,88 @@ kubectl --context kind-gpu-offload-nvidia delete pod/wsl-gpu-check
 
 The log must list the NVIDIA adapter. Continue to the [NVIDIA offload](./02-first-local-offload.md#podman-kind-nvidia-on-wsl2).
 
+## Bare-Metal NVIDIA with k3s
+
+Use this path on a native Linux install where the NVIDIA driver is loaded and `/dev/nvidia*` exists. Do not use it in WSL2.
+
+Confirm the host first:
+
+```bash
+nvidia-smi
+ls /dev/nvidia*
+grep -qi microsoft /proc/version && echo "WSL detected - use the WSL path" || echo "bare metal"
+```
+
+### Install the NVIDIA Container Toolkit
+
+Install the toolkit exactly as in the WSL path, then generate the CDI specification:
+
+```bash
+sudo apt-get install --yes nvidia-container-toolkit
+sudo mkdir -p /etc/cdi
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+nvidia-ctk cdi list
+```
+
+> [!NOTE]
+> Podman 4.9.3 cannot parse the CDI 0.7.0 specification that current `nvidia-ctk` releases generate, so `podman run --device nvidia.com/gpu=all` may fail with `unresolvable CDI devices`. This does not affect k3s, which reads the runtime directly. On the bare-metal path this check is advisory; Podman is used only to build images.
+
+### Create the Cluster
+
+Install k3s and register its kubeconfig context:
+
+```bash
+mise run cluster-20-create
+```
+
+The task pins the k3s version, verifies the installer checksum, and merges the kubeconfig as the context `gpu-offload-k3s`. It renames the cluster, user, and context away from k3s's default name of `default` so a later reinstall replaces the entry instead of merging against a stale certificate authority.
+
+### Register the GPU
+
+```bash
+mise run cluster-30-gpu-enable
+```
+
+This makes the NVIDIA runtime the containerd default and installs the NVIDIA device plugin.
+
+k3s regenerates its containerd configuration on every start, so the default runtime is set through a k3s configuration drop-in rather than by editing containerd files:
+
+```bash
+sudo mkdir -p /etc/rancher/k3s/config.yaml.d
+sudo tee /etc/rancher/k3s/config.yaml.d/10-nvidia-default-runtime.yaml >/dev/null <<'EOF'
+default-runtime: nvidia
+EOF
+sudo systemctl restart k3s
+```
+
+Confirm the setting reached the generated configuration:
+
+```bash
+sudo grep default_runtime_name /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+```
+
+> [!IMPORTANT]
+> The NVIDIA runtime is made the *default* rather than an opt-in `RuntimeClass` because the offload specification has no `runtimeClassName` field, so generated server Deployments cannot select a runtime handler themselves.
+
+### Verify Kubernetes GPU Access
+
+```bash
+mise run cluster-31-gpu-check
+```
+
+The pod log must list the NVIDIA adapter, and the node must report `nvidia.com/gpu: 1` as allocatable. Continue to the [bare-metal NVIDIA offload](./02-first-local-offload.md).
+
+### Control Whether k3s Starts on Boot
+
+k3s installs as a systemd service that is enabled by default. Change that without uninstalling:
+
+```bash
+mise run cluster-82-service-disable
+mise run cluster-81-service-enable
+```
+
+Both tasks leave the cluster running and report the resulting boot and runtime state. Use `mise run cluster-80-stop` and `mise run cluster-70-start` to stop or start the running cluster.
+
 ## Manage Existing Clusters
 
 ### Ref 00: List Clusters
@@ -375,6 +505,96 @@ podman stop "${cluster_name}-control-plane"
 ```
 
 ## Troubleshooting
+
+### The device plugin crashes with an invalid device discovery strategy
+
+The plugin log ends with:
+
+```text
+Incompatible strategy detected auto
+error starting plugins: ... invalid device discovery strategy
+```
+
+The container has no driver libraries, meaning it is not running under the NVIDIA runtime. Confirm the default runtime is applied, then delete the pod. A pod created before the runtime change keeps its original sandbox across `CrashLoopBackOff` restarts and can never pick up the new runtime:
+
+```bash
+sudo grep default_runtime_name /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+kubectl -n kube-system delete pod -l name=nvidia-device-plugin-ds
+```
+
+### A GPU Deployment rollout never completes
+
+The rollout reports `1 old replicas are pending termination` and the new pod stays `Pending` with `Insufficient nvidia.com/gpu`.
+
+A single exclusive GPU cannot be surged: the replacement pod waits for a device that the outgoing pod still holds. The GPU stage must replace rather than roll:
+
+```bash
+kubectl -n gpu-offload-demo patch deployment first-run-client-remote-server-nvidia \
+  --type=merge \
+  --patch '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+```
+
+`mise run offload-50-deploy` applies this automatically whenever the GPU path is active.
+
+### Reinstalling k3s fails TLS verification
+
+`kubectl` reports:
+
+```text
+x509: certificate signed by unknown authority
+```
+
+A previous install left a cluster entry holding the old certificate authority, and the merge kept it. Remove the stale entries and recreate the cluster:
+
+```bash
+kubectl config delete-context gpu-offload-k3s
+kubectl config delete-cluster default
+kubectl config delete-user default
+mise run cluster-20-create
+```
+
+### Admission fails with a 502 from the webhook
+
+Deploying returns:
+
+```text
+failed calling webhook "mutate.gpu-offload.io": ... code 502: 502 Bad Gateway
+```
+
+The controller Service published the pod before its TLS listener was bound. The chart defines a readiness probe on the webhook port to prevent this. Confirm the probe exists and that the endpoint is ready:
+
+```bash
+kubectl -n gpu-offload get deploy gpu-offload-mutate \
+  -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}'
+kubectl -n gpu-offload get endpointslice -l kubernetes.io/service-name=gpu-offload-mutate
+```
+
+### Pods cannot reach each other on Ubuntu 24.04
+
+Verify the firewall is not blocking the pod and service networks, then test real traffic rather than inspecting interfaces:
+
+```bash
+sudo ufw status
+kubectl run probe --image=nginx:1.27-alpine --restart=Never --command -- \
+  sh -c 'nslookup kubernetes.default.svc.cluster.local && echo DNS OK'
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s
+kubectl logs probe && kubectl delete pod probe
+```
+
+`ufw` is the most common cause: enabling it without allowing the pod CIDR breaks pod-to-pod traffic and DNS.
+
+> [!NOTE]
+> Kubernetes normally refuses to start when swap is enabled, but k3s sets `failSwapOn: false`, so an active swap file does not need to be removed. Pods still run with `NoSwap`.
+
+### Podman cannot create a user namespace
+
+Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, which can block rootless `podman build`:
+
+```bash
+sysctl kernel.apparmor_restrict_unprivileged_userns
+```
+
+This restriction affects image builds only. k3s runs as root and is unaffected.
 
 ### kind selects another provider
 
@@ -423,6 +643,24 @@ kubectl wait \
 ```
 
 ## Cleanup
+
+### Remove the Offload Workloads
+
+Remove the demo and controller while leaving the cluster installed and running:
+
+```bash
+mise run teardown
+```
+
+### Delete the Cluster
+
+Remove the workloads and the cluster itself:
+
+```bash
+mise run teardown-all
+```
+
+On the bare-metal path this uninstalls k3s through `/usr/local/bin/k3s-uninstall.sh` and removes the `gpu-offload-k3s` kubeconfig entries. Prefer `mise run cluster-82-service-disable` when the goal is only to stop k3s from starting on boot.
 
 ### Ref 90: Tear Down the CPU Cluster
 

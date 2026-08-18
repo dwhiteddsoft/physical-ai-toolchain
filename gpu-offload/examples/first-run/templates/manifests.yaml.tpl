@@ -1,11 +1,25 @@
+{{- $registry := trimSuffix "/" .Values.image.registry -}}
 {{- $repository := .Values.image.repository -}}
-{{- if .Values.image.registry -}}
-{{- $repository = printf "%s/%s" (trimSuffix "/" .Values.image.registry) $repository -}}
+{{- if $registry -}}
+{{- $repository = printf "%s/%s" $registry $repository -}}
 {{- end -}}
 {{- $image := printf "%s:%s" $repository .Values.image.tag -}}
 {{- if .Values.image.digest -}}
 {{- $image = printf "%s@%s" $repository .Values.image.digest -}}
 {{- end -}}
+{{- $serverRepository := .Values.image.repository -}}
+{{- if .Values.serverStage.image.repository -}}
+{{- $serverRepository = .Values.serverStage.image.repository -}}
+{{- end -}}
+{{- if $registry -}}
+{{- $serverRepository = printf "%s/%s" $registry $serverRepository -}}
+{{- end -}}
+{{- $serverTag := .Values.image.tag -}}
+{{- if .Values.serverStage.image.tag -}}
+{{- $serverTag = .Values.serverStage.image.tag -}}
+{{- end -}}
+{{- $serverImage := printf "%s:%s" $serverRepository $serverTag -}}
+{{- $gpu := .Values.serverStage.gpu -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -50,11 +64,11 @@ data:
     serverstages:
       - name: {{ .Values.serverStage.name }}
         perclient: false
-        serverimage: {{ $image | quote }}
-{{- if .Values.serverStage.wslNvidia.enabled }}
+        serverimage: {{ $serverImage | quote }}
+{{- if and $gpu.enabled (eq $gpu.platform "wsl-nvidia") }}
         env:
           - name: LD_LIBRARY_PATH
-            value: {{ .Values.serverStage.wslNvidia.driverLibraryPath | quote }}
+            value: {{ $gpu.driverLibraryPath | quote }}
 {{- end }}
         resources:
           requests:
@@ -63,12 +77,16 @@ data:
 {{- range $key, $value := .Values.serverStage.resources.limits }}
             {{ $key }}: {{ $value | quote }}
 {{- end }}
-{{- if .Values.serverStage.wslNvidia.enabled }}
-            {{ .Values.serverStage.wslNvidia.resourceName }}: {{ .Values.serverStage.wslNvidia.quantity | quote }}
+{{- if $gpu.enabled }}
+            {{ $gpu.resourceName }}: {{ $gpu.quantity | quote }}
 {{- end }}
     remotefuncs:
       - "demo_model//predict":
           remoteloc: {{ .Values.serverStage.name }}
+{{- if $gpu.enabled }}
+      - "gpu_model//gpu_inference":
+          remoteloc: {{ .Values.serverStage.name }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -102,5 +120,7 @@ spec:
           env:
             - name: REMOTERPORT
               value: "30001"
+            - name: GPU_CHECK
+              value: {{ $gpu.enabled | quote }}
           resources:
 {{ toYaml .Values.clientResources | indent 12 }}

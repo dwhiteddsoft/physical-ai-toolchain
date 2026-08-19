@@ -35,7 +35,9 @@ For a zero-to-verification Podman and kind walkthrough, start with [docs/README.
    to a ConfigMap holding `remote.yaml`.
 
 3. See [examples/so101-real-hardware/README.md](./examples/so101-real-hardware/README.md)
-   for an end-to-end example (SO-101 arm with ROS 2 bridge)
+   for an end-to-end example (SO-101 arm with ROS 2 bridge), or
+   [examples/pi05/README.md](./examples/pi05/README.md) for a UR10e driven by a trained
+   Pi0.5 checkpoint mounted on the GPU node
 
 ## ⚙️ Configuration
 
@@ -143,7 +145,7 @@ flowchart TB
 | Runtime SDK | `runtime/remoter/` | Run inside client and server containers for decoration, discovery, execution, and transport |
 | Runtime internals | `runtime/remoter/rmtconfigkube.py`, `runtime/remoter/autoremote.py`, `runtime/remoter/safe_codec.py`, `runtime/remoter/msgtcp.py` | Watch Pods, start the server, encode MessagePack, and communicate over TCP |
 | Offload configuration | `specifications/remote-spec-schema.md` | Define supported `remote.yaml` fields |
-| Runnable workloads | `examples/first-run/`, `examples/so101-real-hardware/` | Provide client workloads, ConfigMaps, and offload boundaries |
+| Runnable workloads | `examples/first-run/`, `examples/so101-real-hardware/`, `examples/pi05/` | Provide client workloads, ConfigMaps, and offload boundaries |
 
 ### Deployment and admission sequence
 
@@ -255,6 +257,7 @@ pod status. The kubelet does not inspect or forward inference calls.
 | `runtime/`                      | Xavier remoting SDK with MessagePack transport |
 | `specifications/`               | Remote.yaml schema and opt-in contract         |
 | `examples/so101-real-hardware/` | SO-101 end-to-end example                      |
+| `examples/pi05/`                | Pi0.5 UR10e example, node-local checkpoint     |
 
 Additional reference documents:
 

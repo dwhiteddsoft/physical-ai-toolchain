@@ -1,0 +1,8 @@
+# Local development artifacts that must never enter the chart package.
+.venv/
+__pycache__/
+*.pyc
+uv.lock
+Containerfile
+.git/
+.gitignore

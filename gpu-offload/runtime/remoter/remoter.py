@@ -4,59 +4,60 @@ from __future__ import annotations
 Remote function call module
 """
 # pylint: disable=missing-module-docstring, W0604, W1203, W0719, broad-exception-raised, R0913, R0917
+import asyncio
 import atexit
 import copy
-import inspect
-import importlib
-import asyncio
-import os
-import struct
-import traceback
-import secrets
-from dataclasses import dataclass
-from queue import Queue
-import threading
 import ctypes
+import importlib
+import inspect
+import logging
+import multiprocessing
+import os
+import random
+import secrets
+import threading
+import time
+import traceback
+import uuid
+from collections.abc import Callable
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from dataclasses import dataclass
+from functools import partial, wraps
+from multiprocessing import Process
+from queue import Queue
 from threading import Thread
 from types import ModuleType
-from typing import Callable, Dict, Any, Tuple
-from functools import wraps, partial
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, Future
-from multiprocessing import Process
-import multiprocessing
-import uuid
-import time
-import logging
-import random
-from . import msgsock, msgtcp, msgudp, msgunix, msgqueue
+from typing import Any
 
-from termcolor import cprint
-
-from . import simplelog
-from . import rmtconfig
-from . import rmtconfigkube
+from . import class2dict, msgqueue, msgsock, msgtcp, msgudp, msgunix, rmtconfig, rmtconfigkube, simplelog
 from .k8sutils_compat import utils
 from .safe_codec import (
     AdapterContext,
     AdapterRegistry,
     CodecError,
     CodecLimits,
-    CodecLimitsError,
-    CodecTypeError,
     TypeAdapter,
+)
+from .safe_codec import (
     dumps as codec_dumps,
+)
+from .safe_codec import (
     loads as codec_loads,
 )
+
 
 # create a thread local variable
 class ThreadContext(threading.local):
     def __init__(self):
         self.noremote = False
-threadctx = ThreadContext() # instantiated once per thread
+
+
+threadctx = ThreadContext()  # instantiated once per thread
 
 _CODEC_LIMITS = CodecLimits()
 _CODEC_REGISTRY = AdapterRegistry()
 _CODEC_CONTEXT = AdapterContext(role="remoter")
+
 
 def serialize_payload(obj) -> bytes:
     oldnoremote = threadctx.noremote
@@ -71,6 +72,7 @@ def serialize_payload(obj) -> bytes:
     finally:
         threadctx.noremote = oldnoremote
 
+
 def deserialize_payload(payload: bytes) -> Any:
     oldnoremote = threadctx.noremote
     threadctx.noremote = True
@@ -84,7 +86,8 @@ def deserialize_payload(payload: bytes) -> Any:
     finally:
         threadctx.noremote = oldnoremote
 
-def copyobj(obj : Any) -> Any:
+
+def copyobj(obj: Any) -> Any:
     oldnoremote = threadctx.noremote
     threadctx.noremote = True
     try:
@@ -92,8 +95,9 @@ def copyobj(obj : Any) -> Any:
     finally:
         threadctx.noremote = oldnoremote
 
-def modifyloc(loc : str, key: str, actclasskey : str) -> str:
-    if loc=='direct' or loc=='directqueue':
+
+def modifyloc(loc: str, key: str, actclasskey: str) -> str:
+    if loc == "direct" or loc == "directqueue":
         return loc
     try:
         protocol, addr = loc.split("://")
@@ -104,8 +108,8 @@ def modifyloc(loc : str, key: str, actclasskey : str) -> str:
             protocol = "unix"
             loc = f"unix://{loc[5:]}"
         else:
-            useudp = os.environ.get('USE_UDP', 'false').lower() in ['true', '1', 'yes']
-            useudp = getparam("udp", key, actclasskey, useudp) # check config for whether to use udp for this function
+            useudp = os.environ.get("USE_UDP", "false").lower() in ["true", "1", "yes"]
+            useudp = getparam("udp", key, actclasskey, useudp)  # check config for whether to use udp for this function
             if useudp:
                 protocol = "udp"
                 loc = f"udp://{loc}"
@@ -113,6 +117,7 @@ def modifyloc(loc : str, key: str, actclasskey : str) -> str:
                 protocol = "tcp"
                 loc = f"tcp://{loc}"
         return loc
+
 
 # new exception for stopped by user
 class FunctionStoppedException(Exception):
@@ -135,11 +140,13 @@ class RemoteExecutionError(Exception):
         self.descriptor = descriptor
         super().__init__(f"{descriptor.type_name}: {descriptor.message}\n{descriptor.traceback}")
 
-stub_to_class = {} # stub class to actual class
-class_to_stub = {} # actual class to stub class
+
+stub_to_class = {}  # stub class to actual class
+class_to_stub = {}  # actual class to stub class
 
 needmultiproc = False
-remotedclassmetadata = {} # key: class object id -> metadata dict for object
+remotedclassmetadata = {}  # key: class object id -> metadata dict for object
+
 
 def setstubclasses(stub2class):
     # of the form a.b.c: d.e
@@ -147,36 +154,52 @@ def setstubclasses(stub2class):
     stub_to_class.update(stub2class)
     class_to_stub.update({v: k for k, v in stub2class.items()})
 
+
 # just keep track of classes that are remoted, do not modify them
 remotedclasses = set()
+
+
 def addremotedclass(cls):
     remotedclasses.add(cls)
 
+
 fixedlocs = {}
-def setfixedlocs(fixedloc2 : dict):
+
+
+def setfixedlocs(fixedloc2: dict):
     fixedlocs.update(fixedloc2)
 
-def classkey(cls : type) -> str:
+
+def classkey(cls: type) -> str:
     return f"{cls.__module__}/{cls.__name__}"
 
-def issingleinstanceclass(x : object) -> bool:
+
+def issingleinstanceclass(x: object) -> bool:
     return classkey(x.__class__) in singleinstanceclass
 
+
 singleinstanceclass = set()
-singleinstanceclassinstance : dict[str, tuple[threading.Lock, Any, dict, threading.Event]] = {}
+singleinstanceclassinstance: dict[str, tuple[threading.Lock, Any, dict, threading.Event]] = {}
+
+
 def addsingleinstanceclass(cls):
     logger.debug(f"Adding single instance class {cls} to cache")
     singleinstanceclass.add(classkey(cls))
+
+
 singleinstanceclasslock = threading.Lock()
 
 # key -> (lock, result, state, event)
-singleinstancefunc : dict[str, tuple[threading.Lock, Any, dict, threading.Event]] = {}
+singleinstancefunc: dict[str, tuple[threading.Lock, Any, dict, threading.Event]] = {}
 singleinstancefunclock = threading.Lock()
-def addsingleinstancefunc(funcname : str):
+
+
+def addsingleinstancefunc(funcname: str):
     with singleinstancefunclock:
         if funcname not in singleinstancefunc:
             logger.debug(f"Adding single instance function {funcname} to cache")
             singleinstancefunc[funcname] = (threading.Lock(), None, {"state": "notinit"}, threading.Event())
+
 
 singleinstanceclassids = set()
 
@@ -184,13 +207,15 @@ remoterparams = {}
 remoterclassparams = {}
 remoterfuncparams = {}
 paramsset = False
-def setparams(config : dict):
+
+
+def setparams(config: dict):
     global paramsset
     if paramsset:
         return
     configcopy = copy.deepcopy(config)
-    remoteclasses = configcopy.pop('remoteclasses', [])
-    remotefuncs = configcopy.pop('remotefuncs', [])
+    remoteclasses = configcopy.pop("remoteclasses", [])
+    remotefuncs = configcopy.pop("remotefuncs", [])
     remoterparams.update(configcopy)
     for classitem in remoteclasses:
         for classpath, params in classitem.items():
@@ -198,13 +223,14 @@ def setparams(config : dict):
     for funcitem in remotefuncs:
         for funcpath, params in funcitem.items():
             remoterfuncparams[funcpath] = params
-    if 'port' not in remoterparams:
-        remoterparams['port'] = int(os.environ.get('REMOTERPORT', '9000'))
-    if 'socketpath' not in remoterparams:
-        remoterparams['socketpath'] = os.environ.get('REMOTERSOCK', None)
-    if 'server' not in remoterparams:
-        remoterparams['server'] = os.environ.get("SERVER", "false").lower() in ["true", "1", "yes"]
+    if "port" not in remoterparams:
+        remoterparams["port"] = int(os.environ.get("REMOTERPORT", "9000"))
+    if "socketpath" not in remoterparams:
+        remoterparams["socketpath"] = os.environ.get("REMOTERSOCK", None)
+    if "server" not in remoterparams:
+        remoterparams["server"] = os.environ.get("SERVER", "false").lower() in ["true", "1", "yes"]
     paramsset = True
+
 
 # for example, if base class has mod.base.func, classkey is mod.base, funckey is mod.class.func
 #    however, actclass can be different such as modd.derived (modd is a different module with derived class 'derived' inheriting from base)
@@ -213,8 +239,8 @@ def setparams(config : dict):
 #       func.__qualname__ which gives mod.class.func, and then splitting by "." to get class name and function name
 #    classkey however is found using
 #       obj.__class__.__module__ and obj.__class__.__name__ to get module and class name, and then constructing mod.class
-def getparam(key: str, funckey: str|None, actclasskey : str|None, default:Any):
-    #print(key, funckey)
+def getparam(key: str, funckey: str | None, actclasskey: str | None, default: Any):
+    # print(key, funckey)
     logger.debug(f"Getting param {key} for function {funckey} -- default={default}")
     ret = default
     if funckey is None:
@@ -222,7 +248,7 @@ def getparam(key: str, funckey: str|None, actclasskey : str|None, default:Any):
     else:
         # classname here could be baseclass or derivedclass
         module, classname, _ = funckey.split("/")
-    classkey = f"{module}/{classname}" # this could be baseclass
+    classkey = f"{module}/{classname}"  # this could be baseclass
     # priority order for params: overall -> base class -> actual class -> function specific
     if key in remoterparams:
         ret = remoterparams[key]
@@ -234,8 +260,9 @@ def getparam(key: str, funckey: str|None, actclasskey : str|None, default:Any):
         ret = remoterfuncparams[funckey][key]
     return ret
 
-def getdictparam(key: str, funckey: str, actclasskey : str) -> dict:
-    #print(key, funckey)
+
+def getdictparam(key: str, funckey: str, actclasskey: str) -> dict:
+    # print(key, funckey)
     logger.debug(f"Getting param {key} for function {funckey}")
     ret = {}
     if funckey is None:
@@ -245,21 +272,22 @@ def getdictparam(key: str, funckey: str, actclasskey : str) -> dict:
     classkey = f"{module}/{classname}"
     # priority order for params: overall -> base class -> actual class -> function specific, with later ones overwriting earlier ones
     if key in remoterparams:
-        ret.update(remoterparams[key]) # overall params
+        ret.update(remoterparams[key])  # overall params
     if classkey in remoterclassparams and key in remoterclassparams[classkey]:
-        ret.update(remoterclassparams[classkey][key]) # overwrite with base class params (if exist)
+        ret.update(remoterclassparams[classkey][key])  # overwrite with base class params (if exist)
     if actclasskey in remoterclassparams and key in remoterclassparams[actclasskey]:
-        ret.update(remoterclassparams[actclasskey][key]) # overwrite with actual class params (if exist)
+        ret.update(remoterclassparams[actclasskey][key])  # overwrite with actual class params (if exist)
     if funckey in remoterfuncparams and key in remoterfuncparams[funckey]:
-        ret.update(remoterfuncparams[funckey][key]) # overwrite with function params (if exist)
+        ret.update(remoterfuncparams[funckey][key])  # overwrite with function params (if exist)
     return ret
+
 
 # ==================
 
 global imported_modules
 global imported_functions
-imported_modules : Dict[str, ModuleType]= {}
-imported_functions : Dict[str, Callable] = {}
+imported_modules: dict[str, ModuleType] = {}
+imported_functions: dict[str, Callable] = {}
 
 allowed_functions = set()
 allowed_print = False
@@ -267,9 +295,11 @@ is_process = False
 mprunq = None
 mpresults = None
 
+
 def default_func_key(func):
     key, _, _, _ = getfuncname(func)
     return key
+
 
 def getclassinstancefromname(name):
     try:
@@ -280,8 +310,9 @@ def getclassinstancefromname(name):
         class_type = getattr(module, class_name)
         return class_type.__new__(class_type)
     except Exception as e:
-        logger.error(f"failed to create class instance from name {name}: {e}\n{traceback.format_exc()}", color='red')
+        logger.error(f"failed to create class instance from name {name}: {e}\n{traceback.format_exc()}", color="red")
         raise e
+
 
 # returns key, module_name, func_name, class_name
 def getfuncname(func) -> tuple[str, str, str, str]:
@@ -296,6 +327,7 @@ def getfuncname(func) -> tuple[str, str, str, str]:
         class_name = ""
     key = f"{module_name}/{class_name}/{func_name}"
     return key, module_name, func_name, class_name
+
 
 def getfuncobjfromname(key, module_name, func_name, class_name):
     # Get the module object
@@ -315,6 +347,7 @@ def getfuncobjfromname(key, module_name, func_name, class_name):
     func_obj = imported_functions[key]
     return func_obj
 
+
 def localhasattr(obj, name: str) -> bool:
     try:
         object.__getattribute__(obj, name)
@@ -322,14 +355,16 @@ def localhasattr(obj, name: str) -> bool:
     except AttributeError:
         return False
 
+
 # ===================================
 
 remotedclasskey = {}
 
+
 # represents a remoted class on the client side
-class MetaRemotedUUID():
+class MetaRemotedUUID:
     def __init__(self, x):
-        self.uuid_rmt0bf = x.uuid_rmt0bf # x must be an instance of a class with uuid attribute
+        self.uuid_rmt0bf = x.uuid_rmt0bf  # x must be an instance of a class with uuid attribute
         self.rmtloc_rmt0bf = x.rmtloc_rmt0bf
         name = f"{x.__class__.__module__}/{x.__class__.__name__}"
         # self.name always store the actual class name
@@ -337,29 +372,33 @@ class MetaRemotedUUID():
             self.name = stub_to_class[name]
         else:
             self.name = name
-        logger.debug(f"Created MetaRemotedUUID of type {type(x)} with ID {self.uuid_rmt0bf} at location {self.rmtloc_rmt0bf}")
-        self.obj = None # overwrite if wish to transmit actual object
+        logger.debug(
+            f"Created MetaRemotedUUID of type {type(x)} with ID {self.uuid_rmt0bf} at location {self.rmtloc_rmt0bf}"
+        )
+        self.obj = None  # overwrite if wish to transmit actual object
 
     def issingleinstance(self) -> bool:
         return self.name in singleinstanceclass
 
-    def getinstance(self, alternateloc): # get instance of actual class/stub class from MetaRemotedUUID
-        isserver = remoterparams['server']
+    def getinstance(self, alternateloc):  # get instance of actual class/stub class from MetaRemotedUUID
+        isserver = remoterparams["server"]
         if self.obj is None:
-            if (self.name in class_to_stub) and not isserver: # get stub class on client side
+            if (self.name in class_to_stub) and not isserver:  # get stub class on client side
                 x = getclassinstancefromname(class_to_stub[self.name])
-            else: # on server side, always get actual class
+            else:  # on server side, always get actual class
                 x = getclassinstancefromname(self.name)
         else:
             x = self.obj
         x.uuid_rmt0bf = self.uuid_rmt0bf
         x.rmtloc_rmt0bf = self.rmtloc_rmt0bf
-        if x.rmtloc_rmt0bf in ['direct', 'directqueue'] and alternateloc is not None:
-            logger.info(f"Using alternateloc {alternateloc} for direct/directqueue remoted class instance for object of type {type(x)} with ID {self.uuid_rmt0bf}")
+        if x.rmtloc_rmt0bf in ["direct", "directqueue"] and alternateloc is not None:
+            logger.info(
+                f"Using alternateloc {alternateloc} for direct/directqueue remoted class instance for object of type {type(x)} with ID {self.uuid_rmt0bf}"
+            )
             x.rmtloc_rmt0bf = alternateloc
-        #if remoter.islocself(x.rmtloc_rmt0bf):
+        # if remoter.islocself(x.rmtloc_rmt0bf):
         #    x.rmtowner_rmt0bf = True
-        x.rmtowner_rmt0bf = False # set to True for server side once __init__ is called
+        x.rmtowner_rmt0bf = False  # set to True for server side once __init__ is called
         x.failed_rmt0bf = False
         x.remotedclasskey_rmt0bf = remotedclasskey[type(x)]
         logger.debug(f"Created instance of type {type(x)} with ID {self.uuid_rmt0bf} at location {self.rmtloc_rmt0bf}")
@@ -410,6 +449,11 @@ def register_codec_adapter(adapter: TypeAdapter) -> None:
     _CODEC_REGISTRY.register(adapter)
 
 
+def register_class2dict_type(cls: type[Any], *, wire_name: str | None = None) -> None:
+    """Register a stable class2dict wire name or map a remote name to a local class."""
+    class2dict.register_type(cls, name=wire_name)
+
+
 def register_state_adapter(
     *,
     ext_code: int,
@@ -447,31 +491,57 @@ register_codec_adapter(
     )
 )
 
+_CODEC_REGISTRY.register_fallback(
+    TypeAdapter(
+        ext_code=18,
+        py_type=object,
+        encode=lambda obj, _context: class2dict.to_dict(obj),
+        decode=lambda payload, _context: class2dict.from_dict(payload, limits=_CODEC_LIMITS),
+    )
+)
+
+_RESULT_SERIALIZATION_FAILURE_PAYLOAD = serialize_payload(
+    (
+        {"key": "unknown", "loc": "unknown"},
+        None,
+        RemoteErrorDescriptor(
+            type_name="ResultSerializationError",
+            message="Failed to serialize remote result",
+            traceback="",
+        ),
+    )
+)
+
+
 def initfields(x):
-    x.uuid_rmt0bf = uuid.uuid4() # consistent on client and server side
-    x.rmtloc_rmt0bf = None # only set on client side
-    x.failed_rmt0bf = False # only valid on client side
-    x.rmtowner_rmt0bf = False # for both client and server side
+    x.uuid_rmt0bf = uuid.uuid4()  # consistent on client and server side
+    x.rmtloc_rmt0bf = None  # only set on client side
+    x.failed_rmt0bf = False  # only valid on client side
+    x.rmtowner_rmt0bf = False  # for both client and server side
     x.remotedclasskey_rmt0bf = remotedclasskey[type(x)]
 
-nodehydrate = [
-    'remoter.rmtclass//_getfromremote'
-]
 
-def setRemotedClassInCache(obj, remotedClasses: dict, callbackonCacheAdd : Callable|None) -> None:
+nodehydrate = ["remoter.rmtclass//_getfromremote"]
+
+
+def setRemotedClassInCache(obj, remotedClasses: dict, callbackonCacheAdd: Callable | None) -> None:
     # if single instance class, only keep one instance in cache
     if issingleinstanceclass(obj):
         classkeystr = classkey(obj.__class__)
         if classkeystr not in singleinstanceclassinstance:
             with singleinstanceclasslock:
                 # single instance class stored in singleinstanceclassinstance
-                #logger.info(f"ID of obj.__class__: {id(obj.__class__)}")
-                logger.debug(f"Keys: {list(singleinstanceclassinstance.keys())}", color='yellow')
-                if classkeystr not in singleinstanceclassinstance: # check again inside lock to avoid race
+                # logger.info(f"ID of obj.__class__: {id(obj.__class__)}")
+                logger.debug(f"Keys: {list(singleinstanceclassinstance.keys())}", color="yellow")
+                if classkeystr not in singleinstanceclassinstance:  # check again inside lock to avoid race
                     singleinstanceclassinstance[classkeystr] = (
-                        threading.Lock(), obj, {"state": "notinit"}, threading.Event())
+                        threading.Lock(),
+                        obj,
+                        {"state": "notinit"},
+                        threading.Event(),
+                    )
                     logger.info(f"Adding single instance classobject {obj.__class__} to cache -- id: {obj.uuid_rmt0bf}")
-                    #logger.info(f"Dict of object being added: {obj.__dict__}")
+                    # logger.info(f"Dict of object being added: {obj.__dict__}")
                     logger.debug(f"Keys: {list(singleinstanceclassinstance.keys())}")
                     singleinstanceclassids.add(obj.uuid_rmt0bf)
     else:
@@ -481,27 +551,34 @@ def setRemotedClassInCache(obj, remotedClasses: dict, callbackonCacheAdd : Calla
             if callbackonCacheAdd is not None:
                 callbackonCacheAdd(obj)
 
+
 def singleton_new(cls, *args, **kwargs):
     classkeystr = classkey(cls)
     if classkeystr not in singleinstanceclassinstance:
         with singleinstanceclasslock:
-            if classkeystr not in singleinstanceclassinstance: # check again inside
+            if classkeystr not in singleinstanceclassinstance:  # check again inside
                 ret = object.__new__(cls)
                 logger.info(f"Created single instance __new__ {classkeystr}")
                 singleinstanceclassinstance[classkeystr] = (
-                    threading.Lock(), ret, {"state": "notinit"}, threading.Event())
+                    threading.Lock(),
+                    ret,
+                    {"state": "notinit"},
+                    threading.Event(),
+                )
     return singleinstanceclassinstance[classkeystr][1]
+
 
 def singleton_init(x, *args, **kwargs):
     classkeystr = classkey(x.__class__)
     with singleinstanceclasslock:
         lock, instance, state, event = singleinstanceclassinstance[classkeystr]
     with lock:
-        if state['state'] in ["notinit", "initializing"]:
+        if state["state"] in ["notinit", "initializing"]:
             logger.info(f"Initializing single instance {classkeystr}")
             x.__orig_init__(*args, **kwargs)
             singleinstanceclassinstance[classkeystr] = (lock, instance, {"state": "initialized"}, event)
             logger.info(f"Initialized single instance {classkeystr}")
+
 
 # def printSI():
 #     try:
@@ -509,7 +586,8 @@ def singleton_init(x, *args, **kwargs):
 #     except Exception as e:
 #         print(f"Error printing single instance F: {e}")
 
-def getRemotedClassFromCache(objremoted : MetaRemotedUUID, remotedClasses : dict) -> Any|None:
+
+def getRemotedClassFromCache(objremoted: MetaRemotedUUID, remotedClasses: dict) -> Any | None:
     # if obj is set in objremoted, return None so that a new instance is created
     if objremoted.obj is not None:
         return None
@@ -521,6 +599,7 @@ def getRemotedClassFromCache(objremoted : MetaRemotedUUID, remotedClasses : dict
         return remotedClasses[objremoted.uuid_rmt0bf]
     return None
 
+
 # Server -------------- Client
 #                  <--  DehydrateArgs
 # RehydrateArgs
@@ -531,14 +610,20 @@ def getRemotedClassFromCache(objremoted : MetaRemotedUUID, remotedClasses : dict
 # Add to cache should occur on
 # 1. RehydrateArgs
 # 2. DehydrateResult
-def dehydrate(obj : Any, key : str, remotedclasscache : dict, loc : str, isresult : bool, callbackOnCacheAdd) -> Any:
-    dehydratermt = (key not in nodehydrate) or (not isresult) # results are not dehydrated if in nodehydrate, args must always be dehydrated
-    if not isresult and localhasattr(obj, 'setremoteloc'):
-        obj.setremoteloc(loc) # on client side set location to where object is going to be located
+def dehydrate(obj: Any, key: str, remotedclasscache: dict, loc: str, isresult: bool, callbackOnCacheAdd) -> Any:
+    dehydratermt = (key not in nodehydrate) or (
+        not isresult
+    )  # results are not dehydrated if in nodehydrate, args must always be dehydrated
+    if not isresult and localhasattr(obj, "setremoteloc"):
+        obj.setremoteloc(loc)  # on client side set location to where object is going to be located
     # go through the object and replace any RemotedClass with its uuid
-    if type(obj) in remotedclasses: # this is more appropriate since isinstance will return true for subclasses
-        if not localhasattr(obj, 'uuid_rmt0bf'):
-            assert isresult, "Remoted class instance without uuid_rmt0bf found during dehydration on client side"
+    if type(obj) in remotedclasses and (
+        obj.remoteable_rmt0bf or isresult
+    ):  # this is more appropriate since isinstance will return true for subclasses
+        if not localhasattr(obj, "uuid_rmt0bf"):
+            assert isresult, (
+                f"Remoted class instance of type {obj.__class__} without uuid_rmt0bf found during dehydration on client side"
+            )
             initfields(obj)
             if isresult:
                 # set remoteloc to loc - on server side loc is coming from funcargs which is the location of server as seen by client
@@ -546,9 +631,11 @@ def dehydrate(obj : Any, key : str, remotedclasscache : dict, loc : str, isresul
                 obj.rmtowner_rmt0bf = True
         ret = MetaRemotedUUID(obj)
         logger.info(f"Dehydrating for key {key}")
-        logger.info(f"Dehydrating remoted class of type {obj.__class__} with ID {obj.uuid_rmt0bf} - dehydrate={dehydratermt} result={isresult}")
+        logger.info(
+            f"Dehydrating remoted class of type {obj.__class__} with ID {obj.uuid_rmt0bf} - dehydrate={dehydratermt} result={isresult}"
+        )
         if not dehydratermt:
-            if loc in ['direct', 'directqueue']:
+            if loc in ["direct", "directqueue"]:
                 ret.obj = copyobj(obj)
             else:
                 ret.obj = obj
@@ -564,10 +651,13 @@ def dehydrate(obj : Any, key : str, remotedclasscache : dict, loc : str, isresul
     else:
         return obj
 
-def rehydrate(objremoted : MetaRemotedUUID, remotedclasscache : dict, loc : str, isresult : bool, callbackOnCacheAdd) -> Any:
+
+def rehydrate(
+    objremoted: MetaRemotedUUID, remotedclasscache: dict, loc: str, isresult: bool, callbackOnCacheAdd
+) -> Any:
     if isinstance(objremoted, MetaRemotedUUID):
         if isresult:
-            return objremoted.getinstance(loc) # no cache for rehydrate of results (client side)
+            return objremoted.getinstance(loc)  # no cache for rehydrate of results (client side)
         logger.info(f"Rehydrating remoted class with ID {objremoted.uuid_rmt0bf} of type {objremoted.name}")
         assert objremoted.obj is None, "obj should not exist on rehydration of arguments"
         ret = getRemotedClassFromCache(objremoted, remotedclasscache)
@@ -576,7 +666,7 @@ def rehydrate(objremoted : MetaRemotedUUID, remotedclasscache : dict, loc : str,
             return ret
         # if not in cache, create new instance
         rehydrated = objremoted.getinstance(loc)
-        setRemotedClassInCache(rehydrated, remotedclasscache, callbackOnCacheAdd) # not isresult (arguments)
+        setRemotedClassInCache(rehydrated, remotedclasscache, callbackOnCacheAdd)  # not isresult (arguments)
         logger.debug(f"Rehydrated object with ID {objremoted.uuid_rmt0bf} of type {type(rehydrated)}")
         return rehydrated
     elif isinstance(objremoted, list):
@@ -588,8 +678,10 @@ def rehydrate(objremoted : MetaRemotedUUID, remotedclasscache : dict, loc : str,
     else:
         return objremoted
 
-def dehydrate_args(key : str, args: tuple, kwargs: dict, remotedclasscache : dict,
-                   loc : str, callbackOnCacheAdd) -> tuple[tuple, dict]:
+
+def dehydrate_args(
+    key: str, args: tuple, kwargs: dict, remotedclasscache: dict, loc: str, callbackOnCacheAdd
+) -> tuple[tuple, dict]:
     argsn = list(copy.copy(args))
     kwargsn = copy.copy(kwargs)
     # go through args and kwargs and convert any RemotedClass to its uuid
@@ -600,8 +692,10 @@ def dehydrate_args(key : str, args: tuple, kwargs: dict, remotedclasscache : dic
         kwargsn[k] = dehydrate(v, key, remotedclasscache, loc, False, callbackOnCacheAdd)
     return (tuple(argsn), kwargsn)
 
-def rehydrate_args(args: tuple, kwargs: dict, remotedclasscache : dict,
-                   loc : str, callbackOnCacheAdd) -> tuple[tuple, dict]:
+
+def rehydrate_args(
+    args: tuple, kwargs: dict, remotedclasscache: dict, loc: str, callbackOnCacheAdd
+) -> tuple[tuple, dict]:
     argsn = list(copy.copy(args))
     kwargsn = copy.copy(kwargs)
     # go through args and kwargs and convert any MetaRemotedUUID to actual object
@@ -611,24 +705,26 @@ def rehydrate_args(args: tuple, kwargs: dict, remotedclasscache : dict,
         kwargsn[k] = rehydrate(v, remotedclasscache, loc, False, callbackOnCacheAdd)
     return (tuple(argsn), kwargsn)
 
-def get_func_from_stub_func(key : str):
+
+def get_func_from_stub_func(key: str):
     module_name, class_name, func_name = key.split("/")
     if key in stub_to_class:
-        real_module_name, real_class_name, real_func_name = \
-            stub_to_class[f"{module_name}/{class_name}/{func_name}"].split("/")
+        real_module_name, real_class_name, real_func_name = stub_to_class[
+            f"{module_name}/{class_name}/{func_name}"
+        ].split("/")
         real_key = f"{real_module_name}/{real_class_name}/{real_func_name}"
         logger.info(f"Mapping stub function {key} to real function {real_key}")
         return real_key, real_module_name, real_func_name, real_class_name
     elif f"{module_name}/{class_name}" in stub_to_class:
-        real_module_name, real_class_name = \
-            stub_to_class[f"{module_name}/{class_name}"].split("/")
+        real_module_name, real_class_name = stub_to_class[f"{module_name}/{class_name}"].split("/")
         real_key = f"{real_module_name}/{real_class_name}/{func_name}"
         logger.info(f"Mapping stub class function {key} to real class function {real_key}")
         return real_key, real_module_name, func_name, real_class_name
     else:
         return key, module_name, func_name, class_name
 
-def encode_function_call(func, loc : str, remotedclasscache : dict, callbackOnCacheAdd, *args, **kwargs) -> bytes:
+
+def encode_function_call(func, loc: str, remotedclasscache: dict, callbackOnCacheAdd, *args, **kwargs) -> bytes:
     key, _, _, _ = getfuncname(func)
     key, module_name, func_name, class_name = get_func_from_stub_func(key)
     # args is a tuple, kwargs is a dictionary
@@ -638,43 +734,62 @@ def encode_function_call(func, loc : str, remotedclasscache : dict, callbackOnCa
     logger.info(f"Encoded function payload of length {len(payload)} for key {key}")
     return payload
 
-def decode_function_call(payload, conn, remotedClasses, callbackOnCacheAdd) -> tuple[Callable, dict, tuple, dict]:
+
+def decode_function_call(
+    payload, conn, remotedClasses, callbackOnCacheAdd
+) -> tuple[Callable | None, dict, tuple, dict, CodecError | None]:
     try:
-        loc, key, module_name, func_name, class_name, args, kwargs = deserialize_payload(payload)
-    except (CodecError, CodecLimitsError, CodecTypeError) as exc:
+        decoded = deserialize_payload(payload)
+    except (CodecError, TypeError, ValueError) as exc:
+        decode_error = exc if isinstance(exc, CodecError) else CodecError(str(exc))
+        logger.error(f"Failed to decode function call payload: {decode_error}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, decode_error
+    if not isinstance(decoded, tuple) or len(decoded) != 7:
+        exc = CodecError("Function call payload must contain seven fields")
         logger.error(f"Failed to decode function call payload: {exc}")
-        raise
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
+    loc, key, module_name, func_name, class_name, args, kwargs = decoded
+    if not all(isinstance(value, str) for value in (loc, key, module_name, func_name, class_name)):
+        exc = CodecError("Function call metadata fields must be strings")
+        logger.error(f"Failed to decode function call payload: {exc}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
+    if not isinstance(args, tuple) or not isinstance(kwargs, dict):
+        exc = CodecError("Function call arguments must be a tuple and mapping")
+        logger.error(f"Failed to decode function call payload: {exc}")
+        return None, {"key": "unknown", "loc": "unknown"}, (), {}, exc
     logger.debug(f"=====Decoded function for key {key} to location {loc}=====")
     funcargs = {
-        'key': key,
-        'loc': loc, # location of server as seen by client
-        'module_name': module_name,
-        'func_name': func_name,
-        'class_name': class_name
+        "key": key,
+        "loc": loc,  # location of server as seen by client
+        "module_name": module_name,
+        "func_name": func_name,
+        "class_name": class_name,
     }
     # rehydrate args on server side
     if conn is not None:
-        clientloc = conn.get('key', '')
+        clientloc = conn.get("key", "")
     else:
         clientloc = None
     argsn, kwargs = rehydrate_args(args, kwargs, remotedClasses, clientloc, callbackOnCacheAdd)
-    if func_name == '__init__':
+    if func_name == "__init__":
         if len(argsn) > 0 and type(argsn[0]) in remotedClasses:
             # set the remoted class owner to True
             argsn[0].rmtowner_rmt0bf = True
             logger.debug(f"Setting remoted class with ID {argsn[0].uuid_rmt0bf} owner to True")
     # Get the function object
     func_obj = getfuncobjfromname(key, module_name, func_name, class_name)
-    return func_obj, funcargs, argsn, kwargs
+    return func_obj, funcargs, argsn, kwargs, None
+
 
 # return a message to send to the remote server
-class MessageType():
+class MessageType:
     FunctionCall = 1
     FunctionResult = 2
     FunctionCancel = 3
     DeallocateClass = 4
 
-class FunctionType():
+
+class FunctionType:
     Direct = "direct"
     Thread = "thread"
     Process = "process"
@@ -711,38 +826,45 @@ class FunctionType():
         else:
             raise Exception(f"Invalid function type: {functype}")
 
-def functionToMsg(func, loc : str, functype, fnid : uuid.UUID, remotedClassesCache, *args, **kwargs) -> bytes:
+
+def functionToMsg(func, loc: str, functype, fnid: uuid.UUID, remotedClassesCache, *args, **kwargs) -> bytes:
     # message type is the first byte
-    msg = int.to_bytes(MessageType.FunctionCall, 1, 'big')
-    msg += int.to_bytes(FunctionType.toint(functype), 1, 'big')
+    msg = int.to_bytes(MessageType.FunctionCall, 1, "big")
+    msg += int.to_bytes(FunctionType.toint(functype), 1, "big")
     # add the function ID to the message
     msg += fnid.bytes
     payload = encode_function_call(func, loc, remotedClassesCache, None, *args, **kwargs)
     msg += payload
     return msg
 
-def msgToFunction(msg, conn, remotedClasses, callbackOnCacheAdd) -> tuple[uuid.UUID, str, Callable, dict, tuple, dict]:
+
+def msgToFunction(
+    msg, conn, remotedClasses, callbackOnCacheAdd
+) -> tuple[uuid.UUID, str, Callable | None, dict, tuple, dict, CodecError | None]:
     msgtype = msg[0]
     assert msgtype == MessageType.FunctionCall, f"Invalid message type: {msgtype}"
     functype = FunctionType.fromint(msg[1])
     # Get the function ID
     fnid = uuid.UUID(bytes=msg[2:18])
     payload = msg[18:]
-    func_obj, funcargs, args, kwargs = decode_function_call(payload, conn, remotedClasses, callbackOnCacheAdd)
-    return fnid, functype, func_obj, funcargs, args, kwargs
+    func_obj, funcargs, args, kwargs, decode_error = decode_function_call(
+        payload, conn, remotedClasses, callbackOnCacheAdd
+    )
+    return fnid, functype, func_obj, funcargs, args, kwargs, decode_error
 
-class Remoter():
-    waituntillocation = False # if true, will wait until at least one location available
-    writeToReadyFile : tuple[str, str]|None = None # if not None, will write a message once remoter is initialized
+
+class Remoter:
+    waituntillocation = False  # if true, will wait until at least one location available
+    writeToReadyFile: tuple[str, str] | None = None  # if not None, will write a message once remoter is initialized
 
     @staticmethod
     def createemptyinstance():
         # empty instance of the class (for pylance)
         x = Remoter.__new__(Remoter)
-        setattr(x, "init", False)
+        x.init = False
         return x
 
-    def __init__(self, config : dict, host, port, sockpath, fixedrmtloc, rmtport, allowall, locconfig):
+    def __init__(self, config: dict, host, port, sockpath, fixedrmtloc, rmtport, allowall, locconfig):
         # param init
         setparams(config)
         # config
@@ -756,23 +878,25 @@ class Remoter():
         # message handler callback has signature: handleFn(msg, self.uid, *self.args, **self.kwargs)
         # host a function remoter on the given port
         # can start both if fnserver is different
-        if os.environ.get('USE_UDP', 'false').lower() in ['true', '1', 'yes']:
+        if os.environ.get("USE_UDP", "false").lower() in ["true", "1", "yes"]:
             logger.info("Starting UDP server for remoter communication")
-            self.fnserverudp = msgudp.MessageServerUDP(host, port, self.initconn,
-                                                       partial(self.msgHandler, True, False, None), self.closeconn)
+            self.fnserverudp = msgudp.MessageServerUDP(
+                host, port, self.initconn, partial(self.msgHandler, True, False, None), self.closeconn
+            )
         else:
             self.fnserverudp = None
-        if os.environ.get('USE_TCP', 'true').lower() in ['true', '1', 'yes']:
+        if os.environ.get("USE_TCP", "true").lower() in ["true", "1", "yes"]:
             logger.info("Starting TCP server for remoter communication")
-            self.fnservertcp = msgtcp.MessageServerTCP(host, port, self.initconn,
-                                                       partial(self.msgHandler, True, False, None), self.closeconn)
+            self.fnservertcp = msgtcp.MessageServerTCP(
+                host, port, self.initconn, partial(self.msgHandler, True, False, None), self.closeconn
+            )
         else:
             self.fnservertcp = None
         self.port = port
         self.rmtport = rmtport
         # create the threadpool
-        self.pool : ThreadPoolExecutor|None = None
-        self.processPool : ProcessPoolExecutor|None = None
+        self.pool: ThreadPoolExecutor | None = None
+        self.processPool: ProcessPoolExecutor | None = None
         self.poolLock = threading.Lock()
         # also host a queue processor
         self.fnqueue = Queue()
@@ -780,30 +904,35 @@ class Remoter():
         # also create a server for unix socket if sockpath is provided
         self.sockpath = sockpath
         if sockpath is not None:
-            self.sockserver = msgunix.MessageServerUnix(sockpath, self.initconn,
-                                                        partial(self.msgHandler, True, False, None), self.closeconn)
+            self.sockserver = msgunix.MessageServerUnix(
+                sockpath, self.initconn, partial(self.msgHandler, True, False, None), self.closeconn
+            )
             t = Thread(target=self.sockserver.serve_forever)
             t.daemon = True
             t.start()
         # ========
-        self.fnlock = threading.RLock() # results/events guarded by this lock
-        self.results : dict[uuid.UUID, tuple[Any, Exception|None]]= {} # dictionary to hold the results of function calls
-        self.events : dict[uuid.UUID, Any]= {} # dictionary to hold the events for function calls
-        self.tasks : dict[uuid.UUID, dict] = {} # dictionary to hold the tasks (local or remote)
-        self.tasksByName : dict[str, set[uuid.UUID]] = {} # dictionary to hold the tasks by connection (location)
-        self.runningTasks : dict[uuid.UUID, dict] = {} # dictionary to hold the running tasks (local or on behalf of remote client)
-        self.remotedClasses : dict[uuid.UUID, dict] = {} # remoted classes cache
-        self.remotedClassesConn : dict[uuid.UUID, msgsock.Messenger] = {} # remoted class connection on client side
+        self.fnlock = threading.RLock()  # results/events guarded by this lock
+        self.results: dict[
+            uuid.UUID, tuple[Any, Exception | None]
+        ] = {}  # dictionary to hold the results of function calls
+        self.events: dict[uuid.UUID, Any] = {}  # dictionary to hold the events for function calls
+        self.tasks: dict[uuid.UUID, dict] = {}  # dictionary to hold the tasks (local or remote)
+        self.tasksByName: dict[str, set[uuid.UUID]] = {}  # dictionary to hold the tasks by connection (location)
+        self.runningTasks: dict[
+            uuid.UUID, dict
+        ] = {}  # dictionary to hold the running tasks (local or on behalf of remote client)
+        self.remotedClasses: dict[uuid.UUID, dict] = {}  # remoted classes cache
+        self.remotedClassesConn: dict[uuid.UUID, msgsock.Messenger] = {}  # remoted class connection on client side
         self.functionCount = {}
         # =========
-        self.connlock = threading.Lock() # conns/recvconn guarded by this lock
-        self.conns = {} # active connections to remote locations, key is host:port, value is Messenger
-        self.recvconn = {} # connections received by MessageServer
+        self.connlock = threading.Lock()  # conns/recvconn guarded by this lock
+        self.conns = {}  # active connections to remote locations, key is host:port, value is Messenger
+        self.recvconn = {}  # connections received by MessageServer
         # convert to a list of tuples to be used by random.choices
         self.fixedrmtloc = fixedrmtloc
         self.runloc = {}
         self.waitevents = {}
-        self.loclock = threading.Lock() # lock for runloc
+        self.loclock = threading.Lock()  # lock for runloc
         if locconfig is not None:
             logger.info(f"Using locconfig: {locconfig}")
             self.locconfig = rmtconfig.Config(locconfig, self.updateRunLoc)
@@ -817,7 +946,7 @@ class Remoter():
         self.alreadyCleaned = set()  # to avoid cleaning up the same function multiple times
         t.start()
         # multiprocessing support
-        if self.config.get('multiproc', False) or needmultiproc:
+        if self.config.get("multiproc", False) or needmultiproc:
             self.mprunq = multiprocessing.Queue()
             self.mpresults = multiprocessing.Manager().dict()
             t = Thread(target=self.multiprocHandler)
@@ -839,7 +968,7 @@ class Remoter():
         if Remoter.writeToReadyFile is not None:
             filename, message = Remoter.writeToReadyFile
             if not os.path.exists(filename):
-                with open(filename, 'w', encoding='utf-8') as f:
+                with open(filename, "w", encoding="utf-8") as f:
                     f.write(message)
             else:
                 logger.warning(f"Ready file {filename} already exists -- not writing message")
@@ -866,25 +995,27 @@ class Remoter():
         with self.loclock:
             for k, v in runlocconfig.items():
                 self.runloc[k] = {}
-                self.runloc[k]['choices'] = list(v['locations'].keys())
+                self.runloc[k]["choices"] = list(v["locations"].keys())
                 # change port to remote port in choices
                 if self.rmtport is not None and self.rmtport != 0:
-                    for i, host in enumerate(self.runloc[k]['choices']):
-                        if ':' in host:
+                    for i, host in enumerate(self.runloc[k]["choices"]):
+                        if ":" in host:
                             host = host.split(":")[0]  # remove port if present
-                            self.runloc[k]['choices'][i] = f"{host}:{self.rmtport}"
+                            self.runloc[k]["choices"][i] = f"{host}:{self.rmtport}"
                         else:
-                            self.runloc[k]['choices'][i] = f"{host}:{self.rmtport}"
+                            self.runloc[k]["choices"][i] = f"{host}:{self.rmtport}"
                 logger.debug(f"Run location {k} choices: {self.runloc[k]['choices']}")
-                self.runloc[k]['weights'] = [float(v['locations'][k]) for k in v['locations'].keys()]
-                if v.get('allowterminate', True): # and k not in remotedclasskey - even if it is, let it terminate so new class gets created
+                self.runloc[k]["weights"] = [float(v["locations"][k]) for k in v["locations"].keys()]
+                if v.get(
+                    "allowterminate", True
+                ):  # and k not in remotedclasskey - even if it is, let it terminate so new class gets created
                     with self.fnlock:
                         tasks = self.tasksByName.get(k, set())
                         for uid in tasks:
-                            loc = self.tasks[uid]['loc']
-                            if v['locations'].get(loc, 0.0) == 0.0:
+                            loc = self.tasks[uid]["loc"]
+                            if v["locations"].get(loc, 0.0) == 0.0:
                                 logger.debug(f"Cancelling function {uid} at location {loc} due to runloc change")
-                                self.cancelRemotedFunction(uid) # cancel the function if its location is not allowed
+                                self.cancelRemotedFunction(uid)  # cancel the function if its location is not allowed
 
     def onlyRunServer(self):
         # run the server only
@@ -896,7 +1027,7 @@ class Remoter():
 
     def createThreadPool(self, max_workers=6):
         # create a thread pool for running functions
-        if self.pool is None: # initial check to avoid need for lock
+        if self.pool is None:  # initial check to avoid need for lock
             with self.poolLock:
                 if self.pool is None:
                     self.pool = ThreadPoolExecutor(max_workers=max_workers)
@@ -908,40 +1039,49 @@ class Remoter():
                 if self.processPool is None:
                     self.processPool = ProcessPoolExecutor(max_workers=max_workers)
 
-    def initconn(self, msgr : msgsock.Messenger, sockkey : str):
+    def initconn(self, msgr: msgsock.Messenger, sockkey: str):
         with self.connlock:
             if sockkey not in self.recvconn:
-                self.recvconn[sockkey] = {'key': sockkey, 'conn': msgr, 'fns': {}, 'classes': set(),
-                                          'server': True, 'lock': threading.Lock(), 'alive': True}
+                self.recvconn[sockkey] = {
+                    "key": sockkey,
+                    "conn": msgr,
+                    "fns": {},
+                    "classes": set(),
+                    "server": True,
+                    "lock": threading.Lock(),
+                    "alive": True,
+                }
 
-    def stopfn(self, uid : uuid.UUID, fn : dict, callback : Callable[[uuid.UUID, Any, Exception|None, dict|None], None]|None):
+    def stopfn(
+        self, uid: uuid.UUID, fn: dict, callback: Callable[[uuid.UUID, Any, Exception | None, dict | None], None] | None
+    ):
         logger.debug(f"Stopping function with ID {uid} -- function: {fn}")
-        if 'thread' in fn:
+        if "thread" in fn:
             # stop the thread - this is a hack
-            t : threading.Thread = fn['thread']
+            t: threading.Thread = fn["thread"]
             res = ctypes.pythonapi.PyThreadState_SetAsyncExc(t.native_id, ctypes.py_object(SystemExit))
-        elif 'process' in fn:
-            p : Process = fn['process']
+        elif "process" in fn:
+            p: Process = fn["process"]
             p.terminate()
-        elif 'threadpooltask' in fn:
+        elif "threadpooltask" in fn:
             # stop the task
-            task : Future = fn['threadpooltask']
+            task: Future = fn["threadpooltask"]
             task.cancel()
-        elif 'processpooltask' in fn:
+        elif "processpooltask" in fn:
             # stop the task
-            task : Future = fn['processpooltask']
+            task: Future = fn["processpooltask"]
             task.cancel()
         else:
             # else nothing to cancel
             logger.debug(f"No currently running cancellable task found for function with ID {uid}")
         # no result since function was stopped, only exception
-        self.addForCleanup(uid, callback, None, FunctionStoppedException("Function stopped by user"), {'key': None})
+        self.addForCleanup(uid, callback, None, FunctionStoppedException("Function stopped by user"), {"key": None})
 
     # closeconn does not receive a valid socket
     # this is on the server side
-    def closeconn(self, msgr : msgsock.Messenger, sockkey : str):
-        #print(f"Closing connection to {sock}")
-        #key = self.socktokey(sock)
+    def closeconn(self, msgr: msgsock.Messenger, sockkey: str):
+        # print(f"Closing connection to {sock}")
+        # key = self.socktokey(sock)
         logger.debug(f"Closing connection with key {sockkey}")
         with self.connlock:
             if sockkey in self.recvconn:
@@ -951,17 +1091,17 @@ class Remoter():
             else:
                 logger.error(f"Connection {sockkey} not found in recvconn")
                 return
-        with conn['lock']:
-            conn['alive'] = False
-            for fnid, fn in conn['fns'].items():
+        with conn["lock"]:
+            conn["alive"] = False
+            for fnid, fn in conn["fns"].items():
                 logger.debug(f"Stopping function {fnid} -- {fn} since connection closed")
                 self.stopfn(fnid, fn, None)
-            for classuid in conn['classes']:
+            for classuid in conn["classes"]:
                 logger.debug(f"Deallocating class with ID {classuid} since connection closed")
                 self.addClassForCleanup(classuid)
 
-    def setfnevent(self, fnid : uuid.UUID):
-        #self.events[fnid].set()
+    def setfnevent(self, fnid: uuid.UUID):
+        # self.events[fnid].set()
         if fnid not in self.events:
             return
         if isinstance(self.events[fnid], tuple):
@@ -974,7 +1114,7 @@ class Remoter():
             return self.events[fnid]
 
     # this is on the client side
-    def closeclientconn(self, loc : str, msgr : msgsock.Messenger, sockkey : str):
+    def closeclientconn(self, loc: str, msgr: msgsock.Messenger, sockkey: str):
         with self.connlock:
             if loc in self.conns:
                 # remove the connection from the conns dictionary
@@ -982,19 +1122,19 @@ class Remoter():
                 del self.conns[loc]
             else:
                 return
-        with conn['lock']:
-            conn['alive'] = False
+        with conn["lock"]:
+            conn["alive"] = False
             # remove the connection from the recvconn dictionary
-            for fnid in conn['fnuid']:
+            for fnid in conn["fnuid"]:
                 self.setfnevent(fnid)
                 # but keep the result not present in the dictionary so we know the function was not completed
-            for classuid, obj in conn['classes'].items():
-                setattr(obj, "failed_rmt0bf", True)
+            for classuid, obj in conn["classes"].items():
+                obj.failed_rmt0bf = True
                 self.remotedClassesConn.pop(classuid, None)
 
     def runfunc(self, func, *args, **kwargs):
         # get the function object
-        if hasattr(func, '__wrapped__'):
+        if hasattr(func, "__wrapped__"):
             func = func.__wrapped__
         if inspect.iscoroutinefunction(func):
             result = asyncio.run(func(*args, **kwargs))
@@ -1005,16 +1145,16 @@ class Remoter():
     def cleanupFunctions(self):
         while True:
             cleanup, args = self.cleanupQueue.get()
-            if cleanup=='fn':
-                fnid, callback, result, ex, funcargs = args # unpack the tuple
+            if cleanup == "fn":
+                fnid, callback, result, ex, funcargs = args  # unpack the tuple
                 logger.debug(f"Cleaning up function with ID {fnid}")
                 # remove from the running tasks
                 with self.fnlock:
                     self.runningTasks.pop(fnid, None)
                 if callback is not None:
                     callback(fnid, result, ex, funcargs)
-            elif cleanup=='class':
-                classuid, = args # unpack the tuple
+            elif cleanup == "class":
+                (classuid,) = args  # unpack the tuple
                 logger.debug(f"Cleaning up class with ID {classuid}")
                 with self.fnlock:
                     if classuid in self.remotedClasses:
@@ -1024,12 +1164,18 @@ class Remoter():
                         remotedclassmetadata.pop(obj, None)
                         del self.remotedClasses[classuid]
 
-    def removeFromCleanup(self, fnid : uuid.UUID):
+    def removeFromCleanup(self, fnid: uuid.UUID):
         with self.fnlock:
             self.alreadyCleaned.discard(fnid)
 
-    def addForCleanup(self, fnid : uuid.UUID, callback : Callable[[uuid.UUID, Any, Exception|None, dict|None], None]|None,
-                      result : Any, ex : Exception|None, funcargs : dict):
+    def addForCleanup(
+        self,
+        fnid: uuid.UUID,
+        callback: Callable[[uuid.UUID, Any, Exception | None, dict | None], None] | None,
+        result: Any,
+        ex: Exception | None,
+        funcargs: dict,
+    ):
         with self.fnlock:
             if fnid in self.alreadyCleaned or fnid not in self.runningTasks:
                 # already cleaned up this function
@@ -1037,10 +1183,12 @@ class Remoter():
                 return
             logger.debug("Adding function with ID " + str(fnid) + " for cleanup")
             self.alreadyCleaned.add(fnid)
-            self.cleanupQueue.put(('fn', (fnid, callback, result, ex, funcargs)))
-            threading.Timer(5.0, self.removeFromCleanup, args=(fnid,)).start() # remove from cleanup after 5 seconds if not cleaned up
+            self.cleanupQueue.put(("fn", (fnid, callback, result, ex, funcargs)))
+            threading.Timer(
+                5.0, self.removeFromCleanup, args=(fnid,)
+            ).start()  # remove from cleanup after 5 seconds if not cleaned up
 
-    def addClassForCleanup(self, classuid : uuid.UUID):
+    def addClassForCleanup(self, classuid: uuid.UUID):
         with self.fnlock:
             if classuid in self.alreadyCleaned or classuid not in self.remotedClasses:
                 # already cleaned up this class
@@ -1048,12 +1196,20 @@ class Remoter():
                 return
             logger.debug("Adding class with ID " + str(classuid) + " for cleanup")
             self.alreadyCleaned.add(classuid)
-            self.cleanupQueue.put(('class', (classuid,)))
-            threading.Timer(5.0, self.removeFromCleanup, args=(classuid,)).start() # remove from cleanup after 5 seconds if not cleaned up
+            self.cleanupQueue.put(("class", (classuid,)))
+            threading.Timer(
+                5.0, self.removeFromCleanup, args=(classuid,)
+            ).start()  # remove from cleanup after 5 seconds if not cleaned up
 
-    def funcWrap(self, fnid : uuid.UUID, func : Callable, funcargs : dict,
-                 callback : Callable[[uuid.UUID, Any, Exception|None], None],
-                 *args, **kwargs) -> None:
+    def funcWrap(
+        self,
+        fnid: uuid.UUID,
+        func: Callable,
+        funcargs: dict,
+        callback: Callable[[uuid.UUID, Any, Exception | None], None],
+        *args,
+        **kwargs,
+    ) -> None:
         global allowed_print
         if not allowed_print:
             # print the allowed functions only once
@@ -1068,7 +1224,7 @@ class Remoter():
                 raise Exception(f"Function {key} is not allowed to be called remotely")
             result = self.runfunc(func, *args, **kwargs)
             logger.debug(f"Function with ID {fnid} completed execution")
-            if funcargs['func_name'] == '__init__':
+            if funcargs["func_name"] == "__init__":
                 if len(args) > 0 and type(args[0]) in remotedclasses:
                     assert result is None, "__init__ should not return a value"
                     result = args[0].uuid_rmt0bf
@@ -1082,9 +1238,11 @@ class Remoter():
         if getparam("noresultprint", None, None, True):
             logger.info(f"Function {fnid} {func} completed with exception: {ex} -- is_process: {is_process}")
         else:
-            logger.info(f"Function {fnid} {func} completed with result: {result} -- exception: {ex} -- is_process: {is_process}")
+            logger.info(
+                f"Function {fnid} {func} completed with result: {result} -- exception: {ex} -- is_process: {is_process}"
+            )
         if is_process and mprunq is not None:
-            mprunq.put({'type': 'addforcleanup', 'fnid': fnid, 'result': result, 'ex': ex})
+            mprunq.put({"type": "addforcleanup", "fnid": fnid, "result": result, "ex": ex})
         else:
             self.addForCleanup(fnid, callback, result, ex, funcargs)
 
@@ -1099,33 +1257,39 @@ class Remoter():
         mpresults = _mpresults
         self.funcWrap(*args, **kwargs)
 
-    def getrunloc(self, taskname, actclasskey, key, *args) -> tuple[str, uuid.UUID|None]:
+    def getrunloc(self, taskname, actclasskey, key, *args) -> tuple[str, uuid.UUID | None]:
         isremotedclass, classuid = self.isremotedclass(args)
         if isremotedclass and args[0].failed_rmt0bf:
             raise Exception("Class is in a failed state -- cannot run function")
 
         for arg in args:
             # if a location set, use that location & set the location for the first argument if it is a remoted class
-            if localhasattr(arg, 'rmtloc_rmt0bf') and arg.rmtloc_rmt0bf is not None:
+            if localhasattr(arg, "rmtloc_rmt0bf") and arg.rmtloc_rmt0bf is not None:
                 # if any of the remoted class arguments has a location set, use that location
-                logger.debug(f"Using remoted class argument location {arg.rmtloc_rmt0bf} for function {taskname} - classuid: {classuid}")
+                logger.debug(
+                    f"Using remoted class argument location {arg.rmtloc_rmt0bf} for function {taskname} - classuid: {classuid}"
+                )
                 if isremotedclass:
-                    args[0].rmtloc_rmt0bf = arg.rmtloc_rmt0bf # for remoted classes, set the location so that it can be used later
+                    args[
+                        0
+                    ].rmtloc_rmt0bf = (
+                        arg.rmtloc_rmt0bf
+                    )  # for remoted classes, set the location so that it can be used later
                 return arg.rmtloc_rmt0bf, classuid
         if Remoter.waituntillocation:
             while True:
                 with self.loclock:
-                    if taskname in self.runloc and len(self.runloc[taskname]['choices']) > 0:
+                    if taskname in self.runloc and len(self.runloc[taskname]["choices"]) > 0:
                         break
                 logger.debug(f"Waiting for location to be available for task {taskname}")
                 time.sleep(2)
         with self.loclock:
             if taskname in self.runloc:
-                #print(self.runloc[taskname]['choices'], self.runloc[taskname]['weights'])
-                if len(self.runloc[taskname]['choices']) == 0:
-                    loc = 'direct'
+                # print(self.runloc[taskname]['choices'], self.runloc[taskname]['weights'])
+                if len(self.runloc[taskname]["choices"]) == 0:
+                    loc = "direct"
                 else:
-                    loc = random.choices(self.runloc[taskname]['choices'], self.runloc[taskname]['weights'])[0]
+                    loc = random.choices(self.runloc[taskname]["choices"], self.runloc[taskname]["weights"])[0]
             else:
                 loc = "direct"
             # if rmtloc is set
@@ -1135,43 +1299,52 @@ class Remoter():
                 loc = fixedlocs[key]
             if len(args) > 0:
                 if type(args[0]) in remotedclasskey:
-                    if key in ['remoter.rmtclass//objgetattr', 'remoter.rmtclass//objsetattr']:
+                    if key in ["remoter.rmtclass//objgetattr", "remoter.rmtclass//objsetattr"]:
                         if remotedclasskey[type(args[0])] in fixedlocs:
                             loc = fixedlocs[remotedclasskey[type(args[0])]]
         loc = modifyloc(loc, key, actclasskey)
         if isremotedclass:
             assert len(args) > 0, "Remoted class method must have at least one argument"
-            args[0].rmtloc_rmt0bf = loc # for remoted classes, set the location so that it can be used later
-        logger.debug(f"taskname: {taskname} -- isremotedclass: {isremotedclass} -- classuid: {classuid} -- location: {loc}")
+            args[0].rmtloc_rmt0bf = loc  # for remoted classes, set the location so that it can be used later
+        logger.debug(
+            f"taskname: {taskname} -- isremotedclass: {isremotedclass} -- classuid: {classuid} -- location: {loc}"
+        )
         return loc, classuid
 
-    def getconn(self, loc : str, uid : uuid.UUID, classuid : uuid.UUID|None, obj):
+    def getconn(self, loc: str, uid: uuid.UUID, classuid: uuid.UUID | None, obj):
         # get the connection to the server
         with self.connlock:
             if loc not in self.conns:
                 # create a new connection to the server
                 protocol, addr = loc.split("://")
                 handlefn = partial(self.msgHandler, False, False, loc)
-                closefn = (lambda msgr, sockkey : self.closeclientconn(loc, msgr, sockkey))
-                if protocol == 'unix':
+                closefn = lambda msgr, sockkey: self.closeclientconn(loc, msgr, sockkey)
+                if protocol == "unix":
                     conn = msgunix.MessengerUnix(self.sockpath, None, loc, None, handlefn, closefn)
-                elif protocol == 'udp':
+                elif protocol == "udp":
                     conn = msgudp.MessengerUDP(None, loc, False, None, handlefn, closefn)
-                elif protocol == 'tcp':
+                elif protocol == "tcp":
                     conn = msgtcp.MessengerTCP(None, loc, None, handlefn, closefn)
                 else:
                     raise Exception(f"Invalid protocol: {protocol}")
-                self.conns[loc] = {'key': loc, 'conn': conn, 'fnuid': set(), 'classes': {},
-                                   'server': False, 'lock': threading.Lock(), 'alive': True}
+                self.conns[loc] = {
+                    "key": loc,
+                    "conn": conn,
+                    "fnuid": set(),
+                    "classes": {},
+                    "server": False,
+                    "lock": threading.Lock(),
+                    "alive": True,
+                }
                 logger.info(f"Created new connection to location {loc} for function with ID {uid}", color="green")
             else:
-                conn = self.conns[loc]['conn']
-            self.conns[loc]['fnuid'].add(uid)
+                conn = self.conns[loc]["conn"]
+            self.conns[loc]["fnuid"].add(uid)
             if classuid is not None:
-                self.conns[loc]['classes'][classuid] = obj
+                self.conns[loc]["classes"][classuid] = obj
         return conn
 
-    def cancelRemotedFunction(self, uid : uuid.UUID):
+    def cancelRemotedFunction(self, uid: uuid.UUID):
         # send cancellation message to the server
         with self.fnlock:
             if uid in self.tasks:
@@ -1180,34 +1353,36 @@ class Remoter():
                 raise Exception(f"Function {uid} not found in tasks")
             runningtask = self.runningTasks.get(uid, None)
 
-        loc = taskinfo['loc']
-        logger.debug(f"Sending cancellation message to connection {loc} for function with ID {uid} -- running task: {runningtask}")
-        if loc == 'direct' and runningtask is not None:
+        loc = taskinfo["loc"]
+        logger.debug(
+            f"Sending cancellation message to connection {loc} for function with ID {uid} -- running task: {runningtask}"
+        )
+        if loc == "direct" and runningtask is not None:
             # stop the function locally
             self.stopfn(uid, runningtask, self.qcallback)
         else:
-            msg = int.to_bytes(MessageType.FunctionCancel, 1, 'big')
+            msg = int.to_bytes(MessageType.FunctionCancel, 1, "big")
             msg += uid.bytes
-            if loc == 'directqueue':
+            if loc == "directqueue":
                 # send the message to the queue
                 self.fnqueueProc.putMessage(msg)
             else:
                 with self.connlock:
                     conn = self.conns.get(loc, None)
                 if conn is not None:
-                    conn['conn'].senddata(msg)
+                    conn["conn"].senddata(msg)
 
     def deallocateClass(self, obj):
         _, classuid = self.isremotedclass((obj,))
         if classuid is not None:
             logger.debug(f"Deallocating class with ID {classuid}")
             loc = obj.rmtloc_rmt0bf
-            if loc == 'direct':
+            if loc == "direct":
                 self.addClassForCleanup(classuid)
             else:
-                msg = int.to_bytes(MessageType.DeallocateClass, 1, 'big')
+                msg = int.to_bytes(MessageType.DeallocateClass, 1, "big")
                 msg += classuid.bytes
-                if loc == 'directqueue':
+                if loc == "directqueue":
                     # send the message to the queue
                     self.fnqueueProc.putMessage(msg)
                 else:
@@ -1218,23 +1393,24 @@ class Remoter():
     def initrmtclassonclient(self, *args):
         if len(args) > 0:
             if type(args[0]) in remotedclasses:
-                if not localhasattr(args[0], 'uuid_rmt0bf') or args[0].uuid_rmt0bf is None: # not init yet
+                if not localhasattr(args[0], "uuid_rmt0bf") or args[0].uuid_rmt0bf is None:  # not init yet
                     initfields(args[0])
                     logger.debug(f"Initializing remote class on client with id {args[0].uuid_rmt0bf}")
 
-    def islocself(self, loc : str) -> bool:
+    def islocself(self, loc: str) -> bool:
         if loc == "direct":
             return True
         if self.fnservertcp and self.fnservertcp.isself(loc):
             return True
         if self.fnserverudp and self.fnserverudp.isself(loc):
             return True
-        if hasattr(self, 'sockserver') and self.sockserver.isself(loc):
+        if hasattr(self, "sockserver") and self.sockserver.isself(loc):
             return True
         return False
 
-    def runRemotedfunction(self, taskname, functype, nowait, fixedloc, func, *args, **kwargs) -> \
-        Tuple[bool, uuid.UUID, asyncio.Event|threading.Event]:
+    def runRemotedfunction(
+        self, taskname, functype, nowait, fixedloc, func, *args, **kwargs
+    ) -> tuple[bool, uuid.UUID, asyncio.Event | threading.Event]:
 
         self.initrmtclassonclient(*args)
         key, module_name, func_name, class_name = getfuncname(func)
@@ -1248,17 +1424,19 @@ class Remoter():
             actclasskey = None
         loc, classuid = self.getrunloc(taskname, actclasskey, key, *args)
         if fixedloc is not None:
-            loc = fixedloc # override the location if fixedloc is provided
+            loc = fixedloc  # override the location if fixedloc is provided
         isasync = inspect.iscoroutinefunction(func)
         uid = uuid.uuid4()
-        taskinfo = {'loc': loc, 'func_name': func_name, 'args': args}
-        logger.info(f"===Running remoted function {key} with ID {uid} -- classuid {classuid} -- location: {loc} -- async: {isasync}====")
-        if key in ['remoter.rmtclass//objgetattr', 'remoter.rmtclass//objsetattr']:
+        taskinfo = {"loc": loc, "func_name": func_name, "args": args}
+        logger.info(
+            f"===Running remoted function {key} with ID {uid} -- classuid {classuid} -- location: {loc} -- async: {isasync}===="
+        )
+        if key in ["remoter.rmtclass//objgetattr", "remoter.rmtclass//objsetattr"]:
             logger.info(f"Getting attribute {args[1]} of remoted class {args[0].uuid_rmt0bf} of tpe {type(args[0])}")
         if isasync:
             # create an async event which can be awaited
             event = asyncio.Event()
-            #print(asyncio.get_running_loop())
+            # print(asyncio.get_running_loop())
             with self.fnlock:
                 self.events[uid] = (event, asyncio.get_running_loop())
                 self.tasks[uid] = taskinfo
@@ -1274,11 +1452,11 @@ class Remoter():
             argsn, kwargsn = dehydrate_args(key, args, kwargs, self.remotedClasses, loc, None)
             argsn, kwargsn = rehydrate_args(argsn, kwargsn, self.remotedClasses, loc, None)
             funcargs = {
-                'key': key,
-                'loc': loc,
-                'module_name': module_name,
-                'func_name': func_name,
-                'class_name': class_name
+                "key": key,
+                "loc": loc,
+                "module_name": module_name,
+                "func_name": func_name,
+                "class_name": class_name,
             }
             if getparam("direct2direct", key, actclasskey, not isasync and functype == FunctionType.ThreadPool):
                 logger.debug(f"Running function {key} directly without threadpool")
@@ -1288,7 +1466,7 @@ class Remoter():
             return True, uid, event
         else:
             # serialize the function and arguments
-            msg = functionToMsg(func, loc, functype, uid, self.remotedClasses,*args, **kwargs)
+            msg = functionToMsg(func, loc, functype, uid, self.remotedClasses, *args, **kwargs)
             if loc == "directqueue":
                 logger.debug(f"Sending function {taskname} to queue with ID {uid} - msglen: {len(msg)}")
                 self.fnqueueProc.putMessage(msg)
@@ -1314,27 +1492,31 @@ class Remoter():
                 success = conn.senddata(msg)
                 return success, uid, event
 
-    def getResult(self, taskname, uid) -> tuple[Any, Exception|None]:
+    def getResult(self, taskname, uid) -> tuple[Any, Exception | None]:
         with self.fnlock:
             taskinfo = self.tasks.pop(uid, None)
             if taskname in self.tasksByName:
                 self.tasksByName[taskname].discard(uid)
             if uid in self.results:
-                result, ex = self.results[uid] # result, exception tuple
-                logger.debug(f"Getting result for function {taskname} - {taskinfo['func_name']} - with uid {uid} of type {type(result)}")
+                result, ex = self.results[uid]  # result, exception tuple
+                logger.debug(
+                    f"Getting result for function {taskname} - {taskinfo['func_name']} - with uid {uid} of type {type(result)}"
+                )
                 del self.results[uid]
                 del self.events[uid]
                 if taskinfo is not None:
-                    if len(taskinfo['args']) > 0 and taskinfo['func_name'] == '__init__':
-                        if type(taskinfo['args'][0]) in remotedclasses:
-                            if result != taskinfo['args'][0].uuid_rmt0bf:
-                                logger.info(f"Overwriting uuid of remoted class instance to {result} "
-                                            f"-- old {taskinfo['args'][0].uuid_rmt0bf}",
-                                            color='cyan')
-                            taskinfo['args'][0].uuid_rmt0bf = result
+                    if len(taskinfo["args"]) > 0 and taskinfo["func_name"] == "__init__":
+                        if type(taskinfo["args"][0]) in remotedclasses:
+                            if result != taskinfo["args"][0].uuid_rmt0bf:
+                                logger.info(
+                                    f"Overwriting uuid of remoted class instance to {result} "
+                                    f"-- old {taskinfo['args'][0].uuid_rmt0bf}",
+                                    color="cyan",
+                                )
+                            taskinfo["args"][0].uuid_rmt0bf = result
                             result = None
-                #logger.info("Result for function {} with uid {}: {}".format(taskname, uid, result))
-                if result is not None and localhasattr(result, 'uuid_rmt0bf'):
+                # logger.info("Result for function {} with uid {}: {}".format(taskname, uid, result))
+                if result is not None and localhasattr(result, "uuid_rmt0bf"):
                     logger.debug("Result class uuid: " + str(result.uuid_rmt0bf))
                 return result, ex
             else:
@@ -1343,16 +1525,16 @@ class Remoter():
     def multiprocHandler(self):
         while True:
             ret = self.mprunq.get()
-            if ret['type'] == 'addforcleanup':
-                fnid = ret['fnid']
-                result = ret['result']
-                ex = ret['ex']
+            if ret["type"] == "addforcleanup":
+                fnid = ret["fnid"]
+                result = ret["result"]
+                ex = ret["ex"]
                 assert fnid in self.runningTasks
-                callback = self.runningTasks[fnid]['callback']
-                funcargs = self.runningTasks[fnid]['funcargs']
+                callback = self.runningTasks[fnid]["callback"]
+                funcargs = self.runningTasks[fnid]["funcargs"]
                 self.addForCleanup(fnid, callback, result, ex, funcargs)
-            elif ret['type'] == 'runsyncfunction':
-                uid, event, args, kwargs = ret['args']
+            elif ret["type"] == "runsyncfunction":
+                uid, event, args, kwargs = ret["args"]
                 try:
                     res = self.runSyncFunctionProc(*args, **kwargs)
                     self.mpresults[uid] = (res, None)
@@ -1369,12 +1551,12 @@ class Remoter():
         success, uid, event = self.runRemotedfunction(taskname, functype, nowait, loc, func, *args, **kwargs)
         if not success:
             raise Exception(f"Function {taskname} with uid {uid} not found in results - perhaps connection closed")
-        event : asyncio.Event = event
+        event: asyncio.Event = event
         logger.debug(f"Waiting for event with hash {hash(event)}")
         if timeout is not None:
             try:
                 await asyncio.wait_for(event.wait(), timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.cancelRemotedFunction(uid)
                 raise Exception(f"Function {taskname} with uid {uid} timed out after {timeout} seconds")
         else:
@@ -1390,7 +1572,7 @@ class Remoter():
         # add to the multiprocessing queue
         event = multiprocessing.Manager().Event()
         uid = uuid.uuid4()
-        mprunq.put({'type': 'runsyncfunction', 'args': (uid, event, args, kwargs)})
+        mprunq.put({"type": "runsyncfunction", "args": (uid, event, args, kwargs)})
         event.wait()
         result, ex = mpresults.pop(uid, (None, Exception("Function did not complete")))
         if ex is None:
@@ -1404,7 +1586,7 @@ class Remoter():
         success, uid, event = self.runRemotedfunction(taskname, functype, nowait, loc, func, *args, **kwargs)
         if not success:
             raise Exception(f"Function {taskname} with uid {uid} not found in results - perhaps connection closed")
-        event : threading.Event = event
+        event: threading.Event = event
         if timeout is not None:
             completed = event.wait(timeout)
             if not completed:
@@ -1431,30 +1613,35 @@ class Remoter():
         else:
             return self.runSyncFunction(taskname, functype, nowait, timeout, fixedloc, func, *args, **kwargs)
 
-    def isremotedclass(self, args) -> tuple[bool, uuid.UUID|None]:
-        if len(args) > 0 and localhasattr(args[0], 'uuid_rmt0bf'):
+    def isremotedclass(self, args) -> tuple[bool, uuid.UUID | None]:
+        if len(args) > 0 and localhasattr(args[0], "uuid_rmt0bf"):
             return True, args[0].uuid_rmt0bf
         else:
             return False, None
 
     def modifycall_singleinstance_init(self, args0, fnid, orig_callback, func):
         initlock, _, initstate, initevent = singleinstanceclassinstance[classkey(type(args0))]
+
         def callbackinit(*args, **kwargs):
-            initstate['state'] = 'initialized'
+            initstate["state"] = "initialized"
             initevent.set()
-            logger.debug(f"Initialization complete for single instance class {args0.__class__} with ID {fnid} - set event")
+            logger.debug(
+                f"Initialization complete for single instance class {args0.__class__} with ID {fnid} - set event"
+            )
             orig_callback(*args, **kwargs)
+
         def funcinit(*args, **kwargs):
-            initevent.wait() # wait for the class to be initialized and do no initialization
+            initevent.wait()  # wait for the class to be initialized and do no initialization
+
         with initlock:
-            if initstate['state'] == 'notinit':
-                initstate['state'] = 'initializing'
+            if initstate["state"] == "notinit":
+                initstate["state"] = "initializing"
                 logger.debug(f"Initializing single instance class {args0.__class__} with ID {fnid}")
-                callback = callbackinit # this will do the initialization and set the event
+                callback = callbackinit  # this will do the initialization and set the event
                 # func remains the same, it will be called with the same arguments
             else:
                 logger.debug(f"Using already initialized single instance class {args0.__class__} with ID {fnid}")
-                func = funcinit # this will do nothing and wait for the event to be set
+                func = funcinit  # this will do nothing and wait for the event to be set
                 allowed_functions.add("remoter.remoter/Remoter/modifycall_singleinstance_init")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
@@ -1462,7 +1649,8 @@ class Remoter():
 
     def modifycall_singleinstance(self, key, orig_callback, orig_func):
         initlock, _, initstate, initevent = singleinstancefunc[key]
-        #logger.debug(f"Single instance function -- remotedClasses{self.remotedClasses}")
+
+        # logger.debug(f"Single instance function -- remotedClasses{self.remotedClasses}")
         def callbackfirst(*args, **kwargs):
             result = args[1]
             ex = args[2]
@@ -1474,8 +1662,9 @@ class Remoter():
             else:
                 logger.debug(f"Single instance function {key} completed - set event -- result: {result}")
             orig_callback(*args, **kwargs)
+
         def funcnotfirst(*args, **kwargs):
-            initevent.wait() # wait for the class to be initialized and do no initialization
+            initevent.wait()  # wait for the class to be initialized and do no initialization
             with initlock:
                 _, res, _, _ = singleinstancefunc[key]
                 result, ex = res
@@ -1486,16 +1675,17 @@ class Remoter():
                 if ex is not None:
                     raise ex
                 return result
+
         with initlock:
-            if initstate['state'] == 'notinit':
-                initstate['state'] = 'init'
+            if initstate["state"] == "notinit":
+                initstate["state"] = "init"
                 logger.debug(f"Initializing single instance function for {key}")
-                callback = callbackfirst # this will do the initialization and set the event
-                func = orig_func # this will do the same arguments and set arguments
+                callback = callbackfirst  # this will do the initialization and set the event
+                func = orig_func  # this will do the same arguments and set arguments
                 # func remains the same, it will be called with the same arguments
             else:
                 logger.debug(f"Using already initialized single instance function for {key}")
-                func = funcnotfirst # this will do nothing and wait for the event to be set
+                func = funcnotfirst  # this will do nothing and wait for the event to be set
                 allowed_functions.add("remoter.remoter/Remoter/modifycall_singleinstance")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
@@ -1508,11 +1698,18 @@ class Remoter():
     # Dangers of Thread or ProcessPoolTask
     # - these are non-cancellable once started - thread cannot be reliably cancelled, process pool task cannot be cancelled once started
     # - only use thread for windows since function pickling is an issue
-    def callfunction(self, functype, fnid : uuid.UUID, func : Callable, funcargs : dict,
-                     callback : Callable[[uuid.UUID, Any, Exception|None, dict], None],
-                     loc : str|None,
-                     *args, **kwargs) -> tuple[dict, uuid.UUID|None]:
-        if hasattr(func, '__wrapped__'):
+    def callfunction(
+        self,
+        functype,
+        fnid: uuid.UUID,
+        func: Callable,
+        funcargs: dict,
+        callback: Callable[[uuid.UUID, Any, Exception | None, dict], None],
+        loc: str | None,
+        *args,
+        **kwargs,
+    ) -> tuple[dict, uuid.UUID | None]:
+        if hasattr(func, "__wrapped__"):
             func = func.__wrapped__
         key, _, funcname, _ = getfuncname(func)
         # check if function's first argument is a remoted class
@@ -1525,15 +1722,17 @@ class Remoter():
             orig_callback = callback
             orig_func = func
             callback, func = self.modifycall_singleinstance(key, orig_callback, orig_func)
-        #print(callargs, kwargs)
-        logger.debug(f"==Calling function {key} with ID {fnid} -- classuid {classuid} -- functype: {functype} -- loc: {loc}")
+        # print(callargs, kwargs)
+        logger.debug(
+            f"==Calling function {key} with ID {fnid} -- classuid {classuid} -- functype: {functype} -- loc: {loc}"
+        )
         # before starting the function, put empty in for runningTasks so that there is something there
         with self.fnlock:
             self.functionCount[key] = self.functionCount.get(key, 0) + 1
             # print if multiple of 10 calls
             if self.functionCount[key] % 10 == 0:
                 logger.print(f"Function {key} has been called {self.functionCount[key]} times")
-            self.runningTasks[fnid] = {'callback': callback, 'funcargs': funcargs}
+            self.runningTasks[fnid] = {"callback": callback, "funcargs": funcargs}
         # call the function
         if functype == FunctionType.Direct:
             # run the function directly
@@ -1542,93 +1741,119 @@ class Remoter():
         elif functype == FunctionType.Thread:
             # run the function in a thread
             t = Thread(target=self.funcWrap, args=(fnid, func, funcargs, callback, *callargs), kwargs=kwargs)
-            t.daemon = True # terminate the thread when the parent process exits
+            t.daemon = True  # terminate the thread when the parent process exits
             t.start()
-            ret = {'thread': t}
+            ret = {"thread": t}
         elif functype == FunctionType.Process:
             # run the function in a process
-            p = Process(target=self.funcWrapProc, args=(self.mprunq, self.mpresults,
-                                                        fnid, func, funcargs, callback, *callargs), kwargs=kwargs)
-            p.daemon = True # terminate the process when the parent process exits
+            p = Process(
+                target=self.funcWrapProc,
+                args=(self.mprunq, self.mpresults, fnid, func, funcargs, callback, *callargs),
+                kwargs=kwargs,
+            )
+            p.daemon = True  # terminate the process when the parent process exits
             p.start()
-            ret = {'process': p}
+            ret = {"process": p}
         elif functype == FunctionType.ThreadPool:
             self.createThreadPool()
             assert self.pool is not None
             task = self.pool.submit(self.funcWrap, fnid, func, funcargs, callback, *callargs, **kwargs)
-            ret = {'threadpooltask': task}
+            ret = {"threadpooltask": task}
         elif functype == FunctionType.ProcessPool:
             self.createProcessPool()
             assert self.processPool is not None
-            task = self.processPool.submit(self.funcWrapProc, self.mprunq, self.mpresults,
-                                           fnid, func, funcargs, callback, *callargs, **kwargs)
-            ret = {'processpooltask': task}
+            task = self.processPool.submit(
+                self.funcWrapProc, self.mprunq, self.mpresults, fnid, func, funcargs, callback, *callargs, **kwargs
+            )
+            ret = {"processpooltask": task}
         else:
             raise Exception(f"Invalid function type: {functype}")
 
         with self.fnlock:
             if fnid in self.runningTasks:
-                self.runningTasks[fnid].update(ret) # else already removed in case function completed quickly
+                self.runningTasks[fnid].update(ret)  # else already removed in case function completed quickly
         return ret, classuid
 
     # extract a function from the message, call it, then call the callback
     # callback is a function to call when the function is complete
-    def execfunction(self, msg : bytes, callback : Callable[[uuid.UUID, Any, Exception|None], None], conn) -> \
-        tuple[uuid.UUID, uuid.UUID|None, dict]:
+    def execfunction(
+        self, msg: bytes, callback: Callable[[uuid.UUID, Any, Exception | None], None], conn
+    ) -> tuple[uuid.UUID, uuid.UUID | None, dict]:
 
         # get the function object and arguments
-        #print(msg)
-        fnid, functype, func_obj, funcargs, args, kwargs = msgToFunction(msg, conn, self.remotedClasses,
-                                                                         partial(self.addclasstoconn, conn))
+        # print(msg)
+        fnid, functype, func_obj, funcargs, args, kwargs, decode_error = msgToFunction(
+            msg, conn, self.remotedClasses, partial(self.addclasstoconn, conn)
+        )
+        if decode_error is not None:
+            logger.error(f"Failed to decode function call with ID {fnid}: {decode_error}")
+            callback(fnid, None, decode_error, funcargs)
+            return fnid, None, {}
+        assert func_obj is not None
         ret, classuid = self.callfunction(functype, fnid, func_obj, funcargs, callback, None, *args, **kwargs)
         return fnid, classuid, ret
 
     # qcallback is on result path
-    def qcallback(self, fnid : uuid.UUID, result : Any, ex : Exception|None, funcargs : dict):
+    def qcallback(self, fnid: uuid.UUID, result: Any, ex: Exception | None, funcargs: dict):
         with self.fnlock:
-            if result is not None and funcargs['loc'] in ['direct', 'directqueue']:
+            if result is not None and funcargs["loc"] in ["direct", "directqueue"]:
                 # go through dehydrate/rehydrate cycle to simulate remote
                 logger.debug("========= DEHYDRATE/REHYDRATE CYCLE FOR DIRECT RESULT =========" + str(type(result)))
-                result = dehydrate(result, funcargs['key'], self.remotedClasses, funcargs['loc'], True, None)
-                result = rehydrate(result, self.remotedClasses, funcargs['loc'], True, None)
-            self.results[fnid] = (result, ex) # the result will have dehydrated classes only
+                result = dehydrate(result, funcargs["key"], self.remotedClasses, funcargs["loc"], True, None)
+                result = rehydrate(result, self.remotedClasses, funcargs["loc"], True, None)
+            self.results[fnid] = (result, ex)  # the result will have dehydrated classes only
             ev = self.setfnevent(fnid)
             if getparam("noresultprint", None, None, True):
                 logger.debug(f"Function completed with ID {fnid} -- setevent with hash {hash(ev)}")
             else:
                 logger.debug(f"Function completed with ID {fnid} -- result: {result} -- setevent with hash {hash(ev)}")
 
-    def sendResult(self, msgr : msgsock.Messenger, conn, fnid, result : Any, ex : Exception|None, funcargs : dict):
+    def sendResult(self, msgr: msgsock.Messenger, conn, fnid, result: Any, ex: Exception | None, funcargs: dict):
         # send the result back to the client
         logger.debug(f"Sending result for function {fnid} -- funckey: {funcargs['key']}")
-        msg = int.to_bytes(MessageType.FunctionResult, 1, 'big')
+        msg = int.to_bytes(MessageType.FunctionResult, 1, "big")
         msg += fnid.bytes
-        payload = self.encode_result(funcargs, result, ex, partial(self.addclasstoconn, conn))
+        try:
+            payload = self.encode_result(funcargs, result, ex, partial(self.addclasstoconn, conn))
+        except Exception as serialization_error:
+            logger.error(f"Failed to encode result for function {fnid}: {serialization_error}", exc_info=True)
+            try:
+                error_payload = RemoteErrorDescriptor(
+                    type_name=type(serialization_error).__name__,
+                    message=str(serialization_error),
+                    traceback=traceback.format_exc(),
+                )
+                payload = serialize_payload(({"key": "unknown", "loc": "unknown"}, None, error_payload))
+            except Exception:
+                logger.error(f"Failed to encode serialization error for function {fnid}", exc_info=True)
+                payload = _RESULT_SERIALIZATION_FAILURE_PAYLOAD
         msg += payload
         # send the message to the client
         logger.info(f"Sending result message of length {len(msg)} for function {fnid}")
         msgr.senddata(msg)
         # remove the function from the connection
-        with conn['lock']:
-            if fnid in conn['fns']:
-                del conn['fns'][fnid] # function is complete
+        with conn["lock"]:
+            if fnid in conn["fns"]:
+                del conn["fns"][fnid]  # function is complete
             else:
-                conn['fns'][fnid] = None # function is complete but happens before the function is added to the connection
+                conn["fns"][fnid] = (
+                    None  # function is complete but happens before the function is added to the connection
+                )
 
     def addclasstoconn(self, conn, obj):
         classuid = obj.uuid_rmt0bf
         if conn is not None:
-            with conn['lock']:
-                if conn['alive']:
+            with conn["lock"]:
+                if conn["alive"]:
                     if classuid in singleinstanceclassids:
                         logger.info(f"Not adding single instance class {classuid} to connection")
                     else:
                         logger.info(f"Adding class {classuid} to connection")
-                        conn['classes'].add(classuid)
+                        conn["classes"].add(classuid)
                 elif classuid is not None:
                     self.addClassForCleanup(classuid)
 
-    def encode_result(self, funcargs : dict, result : Any, ex : Exception|None, callbackOnCacheAdd) -> bytes:
+    def encode_result(self, funcargs: dict, result: Any, ex: Exception | None, callbackOnCacheAdd) -> bytes:
         ex_payload: RemoteErrorDescriptor | None = None
         if ex is not None:
             ex_payload = RemoteErrorDescriptor(
@@ -1638,23 +1863,33 @@ class Remoter():
             )
         if result is None:
             return serialize_payload((funcargs, None, ex_payload))
-        resn = dehydrate(result, funcargs['key'], self.remotedClasses, funcargs['loc'], True, callbackOnCacheAdd)
+        resn = dehydrate(result, funcargs["key"], self.remotedClasses, funcargs["loc"], True, callbackOnCacheAdd)
         logger.debug(f"Funcargs: {funcargs}, Dehydrated result: {resn} Exception: {ex_payload}")
         return serialize_payload((funcargs, resn, ex_payload))
 
-    def decode_result(self, payload: bytes, loc : str, conn) -> tuple[dict, Any, Exception|None]:
+    def decode_result(self, payload: bytes, loc: str, conn) -> tuple[dict, Any, Exception | None]:
         logger.debug(f"Decoding result of length {len(payload)}")
-        funcargs, result, ex_payload = deserialize_payload(payload)
+        if not payload:
+            raise CodecError("Empty payload received for function result")
+        decoded = deserialize_payload(payload)
+        if not isinstance(decoded, tuple) or len(decoded) != 3:
+            raise CodecError("Function result payload must contain three fields")
+        funcargs, result, ex_payload = decoded
+        if not isinstance(funcargs, dict):
+            raise CodecError("Function result metadata must be a mapping")
         try:
             result = rehydrate(result, self.remotedClasses, loc, True, None)
-        except Exception as e:
-            logger.error(f"Error rehydrating result: {e} {traceback.format_exc()}")
-            raise e
+        except Exception:
+            logger.error("Error rehydrating result", exc_info=True)
+            raise
         ex: Exception | None
         if ex_payload is None:
             ex = None
         elif isinstance(ex_payload, RemoteErrorDescriptor):
-            ex = RemoteExecutionError(ex_payload)
+            if ex_payload.type_name == "AttributeError":
+                ex = AttributeError(ex_payload.message)
+            else:
+                ex = RemoteExecutionError(ex_payload)
         else:
             ex = RemoteExecutionError(
                 RemoteErrorDescriptor(
@@ -1673,12 +1908,24 @@ class Remoter():
         # get the function ID
         fnid = uuid.UUID(bytes=message[1:17])
         payload = message[17:]
-        funcargs, result, ex = self.decode_result(payload, loc, conn)
+        try:
+            funcargs, result, ex = self.decode_result(payload, loc, conn)
+        except Exception as exc:
+            logger.error(f"Failed to decode result for function {fnid}", exc_info=True)
+            funcargs = {"key": "unknown", "loc": loc}
+            result = None
+            ex = RemoteExecutionError(
+                RemoteErrorDescriptor(
+                    type_name="ResultDecodeError",
+                    message=str(exc),
+                    traceback=traceback.format_exc(),
+                )
+            )
         # set the event to unblock the waiting thread
         self.qcallback(fnid, result, ex, funcargs)
 
     # self.handleFn(msg, self.uid, *self.args, **self.kwargs)
-    def msgHandler(self, ismsgserver, fromqueue, loc, message : bytes, _, sockkey : str):
+    def msgHandler(self, ismsgserver, fromqueue, loc, message: bytes, _, sockkey: str):
         logger.debug(f"Handle function message from {sockkey} -- message length: {len(message)}")
         if not fromqueue:
             with self.connlock:
@@ -1689,7 +1936,7 @@ class Remoter():
                 else:
                     # get the connection from the conns dictionary
                     conn = self.conns[loc]
-                msgr : msgsock.Messenger = conn['conn']
+                msgr: msgsock.Messenger = conn["conn"]
             callback = partial(self.sendResult, msgr, conn)
         else:
             conn = None
@@ -1701,20 +1948,21 @@ class Remoter():
             fnid, classuid, fn = self.execfunction(message, callback, conn)
             logger.debug(f"Function call executed with ID {fnid} - classuid: {classuid} - sockkey: {sockkey}")
             if conn is not None and fn != {}:
-                with conn['lock']:
-                    if conn['alive']:
-                        if fnid in conn['fns']:
-                            assert conn['fns'][fnid] is None, f"Function {fnid} already in connection??"
+                with conn["lock"]:
+                    if conn["alive"]:
+                        if fnid in conn["fns"]:
+                            assert conn["fns"][fnid] is None, f"Function {fnid} already in connection??"
                             # remove the function from the connection
-                            del conn['fns'][fnid]
+                            del conn["fns"][fnid]
                         else:
-                            conn['fns'][fnid] = fn
+                            conn["fns"][fnid] = fn
                     else:
                         self.stopfn(fnid, fn, None)
         elif msgtype == MessageType.FunctionResult:
             # handle function result message - only come here if (loc != direct) and (loc != directqueue)
-            assert loc != "direct" and loc != "directqueue", \
-                    "Function result message received for direct or directqueue"
+            assert loc != "direct" and loc != "directqueue", (
+                "Function result message received for direct or directqueue"
+            )
             self.unpackResult(message, loc, conn)
         elif msgtype == MessageType.FunctionCancel:
             # handle function cancel message
@@ -1731,43 +1979,62 @@ class Remoter():
         else:
             logger.error(f"Unknown message type: {msgtype}")
 
-global remoter
-remoter : Remoter = Remoter.createemptyinstance()
-def initRemoter(config : dict, host, port, sockpath, rmtloc, rmtport, allowall, locconfig, configfromkube, onlyrunserver=False):
+
+remoter: Remoter | None = None
+_remoter_init_lock = threading.Lock()
+
+
+def _require_remoter() -> Remoter:
+    runtime = remoter
+    if runtime is None or not runtime.init:
+        raise RuntimeError("Remoter not initialized")
+    return runtime
+
+
+def initRemoter(
+    config: dict, host, port, sockpath, rmtloc, rmtport, allowall, locconfig, configfromkube, onlyrunserver=False
+):
     # if socketpath is an existing directory or does not end in .sock, assume it specifies directory
     # generate socket file name as <socketpath>/POD_UID.sock - raise exception if envvar not set
     if sockpath is not None and (os.path.isdir(sockpath) or not sockpath.endswith(".sock")):
-        sockpath = utils.socketpath(sockpath, os.environ['POD_NAMESPACE'], os.environ['POD_NAME'], os.environ['POD_UID'])
+        sockpath = utils.socketpath(
+            sockpath, os.environ["POD_NAMESPACE"], os.environ["POD_NAME"], os.environ["POD_UID"]
+        )
     # initialize the remoter
     global remoter
-    if configfromkube is not None:
-        rmtconfigkube.rmtconfigkube_init(configfromkube, locconfig) # won't properly work if initialized from here if remoteloc, remoteable params are set
-    if remoter is None or not remoter.init:
-        logger.info(f"Initializing remoter on {host}:{port}")
-        remoter = Remoter(config, host, port, sockpath, rmtloc, rmtport, allowall, locconfig)
-    else:
-        logger.info("Remoter already initialized")
+    with _remoter_init_lock:
+        if configfromkube is not None:
+            rmtconfigkube.rmtconfigkube_init(
+                configfromkube, locconfig
+            )  # won't properly work if initialized from here if remoteloc, remoteable params are set
+        if remoter is None or not remoter.init:
+            logger.info(f"Initializing remoter on {host}:{port}")
+            remoter = Remoter(config, host, port, sockpath, rmtloc, rmtport, allowall, locconfig)
+        else:
+            logger.info("Remoter already initialized")
+        runtime = remoter
     if onlyrunserver:
-        remoter.onlyRunServer() # does not return
-    return remoter
+        runtime.onlyRunServer()  # does not return
+    return runtime
+
 
 def initRemoterFromArgs(args):
     if args.norandom:
         logger.info("Not reseeding random number generator")
         random.seed(4851399312)
     else:
-        #logger.info("Reseeding random number generator")
+        # logger.info("Reseeding random number generator")
         random.seed()
     if args.genkey:
         # generate a key for the remoter
         key = secrets.token_bytes(32)
-        with open(args.key, 'wb') as f:
+        with open(args.key, "wb") as f:
             f.write(key)
         logger.info(f"Generated key (hex): {key.hex()}")
         exit(0)
     if args.key:
         if os.path.exists(args.key):
-            with open(args.key, 'rb') as f:
+            with open(args.key, "rb") as f:
                 key = f.read()
             logger.info(f"Using key (hex): {key.hex()}")
         else:
@@ -1777,25 +2044,42 @@ def initRemoterFromArgs(args):
         msgsock.msgkey = key
     if args.configserver:
         configserver = rmtconfig.ConfigServer(args.confighost, args.configport, args.ssl, args.config)
-        configserver.run() # this returns since flask app started as thread
-    return initRemoter({}, args.host, args.port, args.sockpath, args.rmtloc, args.rmtport, args.allowall, args.config,
-                       args.configfromkube, args.fnserver)
+        configserver.run()  # this returns since flask app started as thread
+    return initRemoter(
+        {},
+        args.host,
+        args.port,
+        args.sockpath,
+        args.rmtloc,
+        args.rmtport,
+        args.allowall,
+        args.config,
+        args.configfromkube,
+        args.fnserver,
+    )
+
 
 def ismetaremotedclass(args) -> bool:
-    return len(args) > 0 and localhasattr(args[0], 'rmtowner_rmt0bf')
+    return len(args) > 0 and localhasattr(args[0], "rmtowner_rmt0bf")
+
 
 def checkForRemotedClass(taskname, func, *args):
     isremoted = ismetaremotedclass(args)
     if isremoted and args[0].rmtowner_rmt0bf:
-        #print(f"Rmt: {args[0]}")
-        #print(f"Taskname: {taskname}, Class key: {remotedclasskey[type(args[0])]}")
+        # print(f"Rmt: {args[0]}")
+        # print(f"Taskname: {taskname}, Class key: {remotedclasskey[type(args[0])]}")
         if taskname == remotedclasskey[type(args[0])]:
             # for remoted classes, if the taskname matches the class key and it is on server side, run __origfunc__ directly
-            logger.debug(f"Taskname {taskname} matches remoted class key {remotedclasskey[type(args[0])]} and is on server side, running {func.__name__} directly")
+            logger.debug(
+                f"Taskname {taskname} matches remoted class key {remotedclasskey[type(args[0])]} and is on server side, running {func.__name__} directly"
+            )
             return True
     return False
 
-def createRemotedTask(func, taskname, functype="threadpooltask", nowait=False, fallbackfn=None, timeout=None) -> Callable:
+
+def createRemotedTask(
+    func, taskname, functype="threadpooltask", nowait=False, fallbackfn=None, timeout=None
+) -> Callable:
     key, _, _, _ = getfuncname(func)
     allowed_functions.add(key)
     logger.info(f"Adding remoted function {key} to allowed functions")
@@ -1804,13 +2088,13 @@ def createRemotedTask(func, taskname, functype="threadpooltask", nowait=False, f
         logger.info(f"Function {key} already has __isremoted__ attribute, skipping remoter wrapping")
         return func
 
-    if functype.lower() in ['process', 'processpooltask']:
+    if functype.lower() in ["process", "processpooltask"]:
         global needmultiproc
         needmultiproc = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        assert remoter is not None, "Remoter not initialized"
+        runtime = _require_remoter()
         # Call the remote function
         remotedclassfunc = checkForRemotedClass(taskname, func, *args)
         if remotedclassfunc:
@@ -1818,11 +2102,11 @@ def createRemotedTask(func, taskname, functype="threadpooltask", nowait=False, f
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return remoter.runSyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runSyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
 
     @wraps(func)
     def wrapper_async(*args, **kwargs):
-        assert remoter is not None, "Remoter not initialized"
+        runtime = _require_remoter()
         # Call the remote function
         remotedclassfunc = checkForRemotedClass(taskname, func, *args)
         if remotedclassfunc:
@@ -1830,7 +2114,7 @@ def createRemotedTask(func, taskname, functype="threadpooltask", nowait=False, f
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return remoter.runAsyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runAsyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
 
     if inspect.iscoroutinefunction(func):
         isasync = True
@@ -1839,13 +2123,14 @@ def createRemotedTask(func, taskname, functype="threadpooltask", nowait=False, f
         isasync = False
         ret = wrapper
 
-    setattr(ret, "__isremoted__", True)
-    setattr(ret, "__remotedtaskname__", taskname)
-    setattr(ret, "__remotedfunctype__", functype)
-    setattr(ret, "__isasync__", isasync)
-    setattr(ret, "__origfunc__", func)
+    ret.__isremoted__ = True
+    ret.__remotedtaskname__ = taskname
+    ret.__remotedfunctype__ = functype
+    ret.__isasync__ = isasync
+    ret.__origfunc__ = func
 
     return ret
+
 
 def createNoRemoteTask(func) -> Callable:
     @wraps(func)
@@ -1867,17 +2152,20 @@ def createNoRemoteTask(func) -> Callable:
         isasync = False
         ret = wrapper
 
-    setattr(ret, "__isremoted__", False)
-    setattr(ret, "__isasync__", isasync)
-    setattr(ret, "__origfunc__", func)
+    ret.__isremoted__ = False
+    ret.__isasync__ = isasync
+    ret.__origfunc__ = func
 
     return ret
+
 
 # a decorator to mark a function as remote - default functype is threadpooltask
 def remotetask(taskname, functype="threadpooltask", nowait=False, fallbackfn=None, timeout=None):
     def decorator(func):
         return createRemotedTask(func, taskname, functype, nowait, fallbackfn, timeout)
+
     return decorator
+
 
 def noremote():
     def decorator(func):
@@ -1887,7 +2175,9 @@ def noremote():
         # so that they can be used in the same way as remotetask
         # but without the remoting functionality
         return createNoRemoteTask(func)
+
     return decorator
+
 
 def add_args(parser, **kwargs):
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
@@ -1895,16 +2185,34 @@ def add_args(parser, **kwargs):
     parser.add_argument("--sockpath", type=str, default=None, help="Socket path for Unix domain socket")
     parser.add_argument("--config", type=str, default=kwargs.get("config", "remoterconfig.yaml"), help="Config file")
     parser.add_argument("--fnserver", action="store_true", default=False, help="Run only as function server")
-    parser.add_argument("--key", type=str, default="", help="Key for the remoter (for security) -- symmetric encryption")
+    parser.add_argument(
+        "--key", type=str, default="", help="Key for the remoter (for security) -- symmetric encryption"
+    )
     parser.add_argument("--genkey", action="store_true", default=False, help="Generate a key for the remoter")
     parser.add_argument("--rmtloc", type=str, default=None, help="Remote host to connect to (for client)")
     parser.add_argument("--rmtport", type=int, default=None, help="Remote port to connect to (for client)")
-    parser.add_argument("--allowall", action='store_true', help="Allow remoting arbitrary functions (not recommended) -- otherwise only remotetask")
-    parser.add_argument("--configserver", action='store_true', default=False, help="Run a config server to provide configuration information for remote tasks/classes")
-    parser.add_argument("--configfromkube", default=None, help="Generate config using number of k8s pods running as remote function server -- argument is taskconfig")
+    parser.add_argument(
+        "--allowall",
+        action="store_true",
+        help="Allow remoting arbitrary functions (not recommended) -- otherwise only remotetask",
+    )
+    parser.add_argument(
+        "--configserver",
+        action="store_true",
+        default=False,
+        help="Run a config server to provide configuration information for remote tasks/classes",
+    )
+    parser.add_argument(
+        "--configfromkube",
+        default=None,
+        help="Generate config using number of k8s pods running as remote function server -- argument is taskconfig",
+    )
     parser.add_argument("--confighost", type=str, default="0.0.0.0", help="Host to bind to for config information")
     parser.add_argument("--configport", type=int, default=10000, help="Port to bind to for config information")
-    parser.add_argument("--norandom", action='store_true', help="Do not reseed random number generator (for testing purposes)")
-    parser.add_argument('--ssl', '-ssl', default=None, help='Use SSL with this certificate file (for config server)')
+    parser.add_argument(
+        "--norandom", action="store_true", help="Do not reseed random number generator (for testing purposes)"
+    )
+    parser.add_argument("--ssl", "-ssl", default=None, help="Use SSL with this certificate file (for config server)")
+
 
 logger = simplelog.initlog("remoter.log", logging.DEBUG, logging.INFO)

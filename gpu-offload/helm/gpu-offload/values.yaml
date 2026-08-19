@@ -9,7 +9,7 @@ image:
   # or set to your registry (e.g. ghcr.io/my-org, docker.io/my-org).
   registry: ""
   # Applied to every container in this chart.
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # -- References to registry pull secrets. Leave empty and prefer workload identity
 # (AKS: federated credentials on a managed identity + AcrPull role assignment) so no
@@ -34,6 +34,9 @@ mutate:
   webhookPort: 6443
   # Log verbosity for the mutate controller (error | warning | info | debug).
   logLevel: warning
+  # Host paths that may be copied from opted-in workloads to remote server deployments.
+  # Exact path matches only. An empty list denies all hostPath volumes.
+  allowedHostPaths: []
   # TLS mode options (choose one):
   # - certManager.enabled: true  -> use cert-manager Certificate (recommended for production)
   # - tls.secretName: <name>     -> use an existing `kubernetes.io/tls` Secret in this namespace

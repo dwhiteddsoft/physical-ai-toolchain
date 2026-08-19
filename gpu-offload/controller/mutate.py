@@ -5,6 +5,7 @@ import base64
 import copy
 import json
 import logging
+import os
 import signal
 import ssl
 import threading
@@ -33,6 +34,7 @@ REMOTE_CONFIG_PATH = f"{XAVIER_CONFIG_MOUNT_PATH}/remote.yaml"
 DEFAULT_TLS_CERT_PATH = "/tls/tls.crt"
 DEFAULT_TLS_KEY_PATH = "/tls/tls.key"
 DEFAULT_PORT = 8443
+ALLOWED_SERVER_HOST_PATHS_ENV = "ALLOWED_SERVER_HOST_PATHS"
 
 READINESS_PROBE = {
     "exec": {"command": ["cat", "/ready.txt"]},
@@ -45,6 +47,7 @@ ALLOWED_SERVER_VOLUME_TYPES = {
     "downwardAPI",
     "emptyDir",
     "ephemeral",
+    "hostPath",
     "persistentVolumeClaim",
     "projected",
     "secret",
@@ -92,7 +95,9 @@ def _validate_string_map(value: Any, *, field: str) -> dict[str, str]:
         raise XavierConfigError(f"{field} must be a mapping")
     normalized: dict[str, str] = {}
     for key, item in value.items():
-        normalized[str(_validate_string(key, field=f"{field} key"))] = str(_validate_string(item, field=f"{field}[{key!r}]"))
+        normalized[str(_validate_string(key, field=f"{field} key"))] = str(
+            _validate_string(item, field=f"{field}[{key!r}]")
+        )
     return normalized
 
 
@@ -182,7 +187,7 @@ def validate_xavier_config(
     *,
     source: str,
     require_remoteablecm: bool,
-    should_add_default_stage: bool = True,
+    materialize_default_stage: bool = True,
 ) -> dict[str, Any]:
     normalized = copy.deepcopy(raw_config)
     if require_remoteablecm:
@@ -225,7 +230,7 @@ def validate_xavier_config(
 
     stages = normalized.get("serverstages")
     if stages is None:
-        if should_add_default_stage:
+        if materialize_default_stage:
             normalized["serverstages"] = [{"name": "", "perclient": top_level_perclient}]
     else:
         if not isinstance(stages, list):
@@ -241,7 +246,7 @@ def _load_annotation_config(raw_annotation: str, *, strict: bool) -> dict[str, A
             parsed,
             source=XAVIER_CONFIG_ANNOTATION,
             require_remoteablecm=True,
-            should_add_default_stage=False,
+            materialize_default_stage=False,
         )
     except XavierConfigError:
         if strict:
@@ -477,9 +482,23 @@ def _volume_lookup(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {volume.get("name"): volume for volume in spec.get("volumes", []) or [] if volume.get("name")}
 
 
-def _volume_is_allowed_for_server(volume: dict[str, Any]) -> bool:
+def _allowed_server_host_paths() -> set[str]:
+    raw = os.getenv(ALLOWED_SERVER_HOST_PATHS_ENV, "[]")
+    try:
+        configured_paths = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise XavierConfigError(f"{ALLOWED_SERVER_HOST_PATHS_ENV} must be a JSON list of paths") from exc
+    if not isinstance(configured_paths, list) or not all(
+        isinstance(path, str) and path.startswith("/") for path in configured_paths
+    ):
+        raise XavierConfigError(f"{ALLOWED_SERVER_HOST_PATHS_ENV} must be a JSON list of absolute paths")
+    return set(configured_paths)
+
+
+def _volume_is_allowed_for_server(volume: dict[str, Any], allowed_host_paths: set[str]) -> bool:
     if "hostPath" in volume:
-        return False
+        host_path = volume.get("hostPath")
+        return isinstance(host_path, dict) and host_path.get("path") in allowed_host_paths
     return any(key in volume for key in ALLOWED_SERVER_VOLUME_TYPES)
 
 
@@ -489,12 +508,13 @@ def copy_allowed_volumes_and_mounts(
     from_container: dict[str, Any],
 ) -> None:
     source_volumes = _volume_lookup(source_spec)
+    allowed_host_paths = _allowed_server_host_paths()
     mount_names = {mount.get("name") for mount in from_container.get("volumeMounts", []) or [] if mount.get("name")}
     destination_volumes = destination_spec.setdefault("volumes", [])
     existing_volume_names = {volume.get("name") for volume in destination_volumes}
     for mount_name in mount_names:
         source_volume = source_volumes.get(mount_name)
-        if source_volume is None or not _volume_is_allowed_for_server(source_volume):
+        if source_volume is None or not _volume_is_allowed_for_server(source_volume, allowed_host_paths):
             continue
         if mount_name not in existing_volume_names:
             destination_volumes.append(copy.deepcopy(source_volume))
@@ -505,7 +525,7 @@ def copy_allowed_volumes_and_mounts(
     existing_mount_names = {mount.get("name") for mount in destination_mounts}
     for mount in from_container.get("volumeMounts", []) or []:
         mount_name = mount.get("name")
-        if mount_name not in mount_names or mount_name in existing_mount_names:
+        if mount_name not in existing_volume_names or mount_name in existing_mount_names:
             continue
         destination_mounts.append(copy.deepcopy(mount))
         existing_mount_names.add(mount_name)
@@ -596,6 +616,8 @@ def create_server_deployment_spec(
     copy_allowed_volumes_and_mounts(deployment["spec"]["template"]["spec"], spec, xavier_container)
 
     container = deployment["spec"]["template"]["spec"]["containers"][0]
+    if "imagePullPolicy" in xavier_container:
+        container["imagePullPolicy"] = xavier_container["imagePullPolicy"]
     env_dict = env_vars_to_dict(xavier_container)
     env_dict.update(_merge_env_lists(xavierconfig.get("env"), getparam(xavierconfig, stage, "env")))
     env_dict.update(
@@ -668,11 +690,16 @@ def merge_configmap_config(
         _safe_yaml_mapping(configmap_raw, source=f"ConfigMap {namespace}/{xaviercfg['remoteablecm']} remote.yaml"),
         source=f"ConfigMap {namespace}/{xaviercfg['remoteablecm']} remote.yaml",
         require_remoteablecm=False,
+        materialize_default_stage=False,
     )
     merged = copy.deepcopy(configmap_cfg)
     for key, value in xaviercfg.items():
         if key != "remoteablecm":
-            merged[key] = copy.deepcopy(value)
+            if key == "env":
+                merged_env = _merge_env_lists(merged.get("env"), value)
+                merged["env"] = [{"name": name, "value": env_value} for name, env_value in merged_env.items()]
+            else:
+                merged[key] = copy.deepcopy(value)
     merged["remoteablecm"] = xaviercfg["remoteablecm"]
     return validate_xavier_config(merged, source="merged xavier config", require_remoteablecm=True)
 
@@ -787,11 +814,13 @@ def create_json_patch(source: Any, target: Any, path: str = "") -> list[dict[str
         for key in sorted(source_keys - target_keys):
             patch.append({"op": "remove", "path": f"{path}/{_json_pointer_escape(key)}"})
         for key in sorted(target_keys - source_keys):
-            patch.append({
-                "op": "add",
-                "path": f"{path}/{_json_pointer_escape(key)}",
-                "value": copy.deepcopy(target[key]),
-            })
+            patch.append(
+                {
+                    "op": "add",
+                    "path": f"{path}/{_json_pointer_escape(key)}",
+                    "value": copy.deepcopy(target[key]),
+                }
+            )
         for key in sorted(source_keys & target_keys):
             patch.extend(create_json_patch(source[key], target[key], f"{path}/{_json_pointer_escape(key)}"))
         return patch
@@ -851,7 +880,9 @@ class XavierAdmissionController:
         operation = request.get("operation")
         obj = request.get("object")
         if not isinstance(obj, dict):
-            return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message="AdmissionReview.request.object must be a JSON object")
+            return HTTPStatus.OK, admission_response(
+                uid=uid, allowed=False, status_message="AdmissionReview.request.object must be a JSON object"
+            )
         if operation not in SUPPORTED_OPERATIONS:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=True)
 
@@ -871,7 +902,9 @@ class XavierAdmissionController:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message=str(exc))
         except Exception as exc:  # pragma: no cover - defensive path
             logger.exception("Unhandled mutation failure")
-            return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message=f"Unhandled mutation failure: {exc}")
+            return HTTPStatus.OK, admission_response(
+                uid=uid, allowed=False, status_message=f"Unhandled mutation failure: {exc}"
+            )
 
         if not changed:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=True)
@@ -945,7 +978,9 @@ def build_ssl_context(cert_file: str, key_file: str) -> ssl.SSLContext:
     return context
 
 
-def load_kubernetes_clients(kubeconfig_path: str | None) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api]:
+def load_kubernetes_clients(
+    kubeconfig_path: str | None,
+) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api]:
     if kubeconfig_path:
         config.load_kube_config(config_file=kubeconfig_path)
     else:
@@ -1013,7 +1048,9 @@ class ReconcileRuntime:
         try:
             self.controller.reconcile_object(obj)
         except XavierConfigError as exc:
-            logger.warning("Skipping reconcile for %s/%s: %s", obj.get("kind"), obj.get("metadata", {}).get("name"), exc)
+            logger.warning(
+                "Skipping reconcile for %s/%s: %s", obj.get("kind"), obj.get("metadata", {}).get("name"), exc
+            )
         except client.exceptions.ApiException as exc:
             logger.warning(
                 "Kubernetes API error while reconciling %s/%s: %s",
@@ -1030,12 +1067,16 @@ def main() -> None:
     parser.add_argument("--cert-file", default=DEFAULT_TLS_CERT_PATH, help="TLS certificate path")
     parser.add_argument("--key-file", default=DEFAULT_TLS_KEY_PATH, help="TLS private key path")
     parser.add_argument("--kubeconfig", default=None, help="Optional kubeconfig path for out-of-cluster use")
-    parser.add_argument("--disable-reconcile", action="store_true", help="Run admission only without background reconciliation")
+    parser.add_argument(
+        "--disable-reconcile", action="store_true", help="Run admission only without background reconciliation"
+    )
     parser.add_argument("--disable-tls", action="store_true", help="Disable TLS for local debugging only")
     parser.add_argument("--log-level", default="INFO", help="Python logging level")
     args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     core_api = apps_api = batch_api = None
     runtime: ReconcileRuntime | None = None
@@ -1065,10 +1106,10 @@ def main() -> None:
 
 
 __all__ = [
-    "AdmissionHTTPServer",
-    "DoMutate",
     "READINESS_PROBE",
     "REMOTE_CONFIG_PATH",
+    "AdmissionHTTPServer",
+    "DoMutate",
     "XavierAdmissionController",
     "XavierConfigError",
     "admission_response",

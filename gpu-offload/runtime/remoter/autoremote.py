@@ -179,6 +179,18 @@ def start(serveronly=True):
 
     remoteconfig = os.environ.get("REMOTER_CONFIG", "remote.yaml")
     remoteconfig = os.path.abspath(remoteconfig)
+
+    # check if remoteconfig is in writeable location, since other files have to be written in this location as well
+    # if it is not in writeable location, use a temporary directory which can persist for lifetime of the process
+    if not os.access(os.path.dirname(remoteconfig), os.W_OK):
+        import tempfile
+        tempdir = tempfile.mkdtemp()
+        newremoteconfig = os.path.join(tempdir, os.path.basename(remoteconfig))
+        logger.info(f"Remote config {remoteconfig} is not in a writeable location. Copying to temporary directory {newremoteconfig}")
+        import shutil
+        shutil.copy(remoteconfig, newremoteconfig)
+        remoteconfig = newremoteconfig
+
     cfg = load_config(remoteconfig)
 
     locconfigfile = cfg.get('configfile', os.environ.get('CONFIGFILE', None))
@@ -188,8 +200,7 @@ def start(serveronly=True):
         locconfigfile = os.path.abspath(os.path.join(dir, locconfigfile))
     logger.info(f"Location Config file: {locconfigfile} -- Remote Task config file: {remoteconfig}")
     if cfg.get('configfromkube', False) or os.environ.get('CONFIGFROMKUBE', 'false').lower() == 'true':
-        # Generated state must be outside the read-only ConfigMap mount.
-        locconfigfile = "/tmp/rmtconfigkube.yaml"
+        locconfigfile = os.path.abspath(os.path.join(os.path.dirname(remoteconfig), "rmtconfigkube.yaml")) # override locconfigfile
         # now also initialize rmtconfigkube
         remoter.Remoter.waituntillocation = True
         if ':' in os.environ.get('WRITE_READY_MESSAGE', ''):

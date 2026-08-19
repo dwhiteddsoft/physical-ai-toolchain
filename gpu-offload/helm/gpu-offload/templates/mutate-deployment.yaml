@@ -109,7 +109,7 @@ spec:
           image: {{ include "gpu-offload.image" (dict "registry" .Values.image.registry "image" .Values.mutate.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
-            - python3
+            - /usr/local/bin/python3
             - /app/mutate.py
             - --port
             - {{ .Values.mutate.webhookPort | quote }}
@@ -120,15 +120,6 @@ spec:
           ports:
             - name: webhook
               containerPort: {{ .Values.mutate.webhookPort }}
-          # Without a readiness gate the Service publishes this pod as soon as the
-          # container starts, so the API server can call the webhook before the TLS
-          # listener is bound and admission fails with a 502.
-          readinessProbe:
-            tcpSocket:
-              port: webhook
-            initialDelaySeconds: 1
-            periodSeconds: 2
-            failureThreshold: 30
           securityContext:
             runAsNonRoot: {{ .Values.mutateSecurityContext.runAsNonRoot }}
             runAsUser: {{ .Values.mutateSecurityContext.runAsUser }}
@@ -146,6 +137,8 @@ spec:
               value: {{ .Values.mutate.logLevel | quote }}
             - name: LOGLEVEL
               value: {{ .Values.mutate.logLevel | quote }}
+            - name: ALLOWED_SERVER_HOST_PATHS
+              value: {{ .Values.mutate.allowedHostPaths | toJson | quote }}
       {{- with .Values.mutateScheduling.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

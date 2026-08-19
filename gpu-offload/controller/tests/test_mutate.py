@@ -218,7 +218,11 @@ def test_admission_review_returns_patch_for_opted_workload():
     assert response['response']['patchType'] == 'JSONPatch'
     patch = _decode_patch(response)
     assert any(operation['path'].endswith('/volumes') for operation in patch)
-    assert any('xavier-parent-name' in operation['path'] for operation in patch)
+    assert any(
+        'xavier-parent-name' in operation['path']
+        or 'xavier-parent-name' in (operation.get('value') or {})
+        for operation in patch
+    )
 
 
 def test_admission_review_passes_through_non_opted_workload():
@@ -281,7 +285,7 @@ def test_http_server_exposes_health_and_mutate_routes():
     thread.start()
     try:
         connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
-        connection.request('GET', '/healthz')
+        connection.request('GET', '/healthz?verbose=true')
         response = connection.getresponse()
         assert response.status == 200
         assert json.loads(response.read()) == {'status': 'ok'}
@@ -292,7 +296,7 @@ def test_http_server_exposes_health_and_mutate_routes():
             'request': {'uid': 'server-test', 'operation': 'CREATE', 'object': _base_workload()},
         }
         payload = json.dumps(review)
-        connection.request('POST', '/mutate', body=payload, headers={'Content-Type': 'application/json'})
+        connection.request('POST', '/mutate?timeout=10s', body=payload, headers={'Content-Type': 'application/json'})
         response = connection.getresponse()
         body = json.loads(response.read())
         assert response.status == 200
@@ -405,6 +409,15 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
     assert {'KEEP_ME', 'ANNOTATION_ENV', 'GLOBAL_ENV', 'SERVER', 'DEPLOYMENT_NAME', 'REMOTER_CONFIG'} <= env_names
     assert any(env['name'] == 'FROM_FIELD' and 'valueFrom' in env for env in default_deployment['spec']['template']['spec']['containers'][0]['env'])
     assert all('hostPath' not in volume for volume in default_deployment['spec']['template']['spec'].get('volumes', []))
+    copied_volume_names = {
+        volume['name'] for volume in default_deployment['spec']['template']['spec'].get('volumes', [])
+    }
+    copied_mount_names = {
+        mount['name']
+        for mount in default_deployment['spec']['template']['spec']['containers'][0].get('volumeMounts', [])
+    }
+    assert copied_mount_names == {'xavierconfig'}
+    assert copied_mount_names <= copied_volume_names
     assert stage_deployment['spec']['replicas'] == 3
     assert stage_deployment['spec']['template']['spec']['nodeSelector'] == {'tier': 'edge'}
     assert stage_deployment['spec']['template']['spec']['containers'][0]['image'] == 'registry/perclient:2'

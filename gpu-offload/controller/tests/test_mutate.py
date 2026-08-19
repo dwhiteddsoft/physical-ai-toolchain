@@ -198,6 +198,29 @@ def test_parent_pod_only_gets_perclient_label_on_xavier_container():
     assert pod['spec'].get('volumes') is None
 
 
+def test_generated_parent_pod_defers_perclient_label_to_runtime():
+    mod = _load_mutate_module()
+    pod = {
+        'kind': 'Pod',
+        'metadata': {
+            'generateName': 'client-job-',
+            'namespace': 'default',
+            'labels': {
+                'xavier-parent-name': 'parent-job',
+                'xavier-parent-kind': 'Job',
+            },
+        },
+        'spec': {
+            'containers': [
+                {'name': 'xavier', 'env': [{'name': 'XAVIER_CONTAINER', 'value': 'true'}]},
+            ]
+        },
+    }
+
+    assert mod.DoMutate(pod) is True
+    assert mod.get_env_var(pod['spec']['containers'][0], 'PERCLIENTSERVERLABEL') == 'unknown'
+
+
 def test_admission_review_returns_patch_for_opted_workload():
     mod = _load_mutate_module()
     controller = mod.XavierAdmissionController()

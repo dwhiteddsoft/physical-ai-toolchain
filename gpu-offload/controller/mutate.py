@@ -394,8 +394,9 @@ def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, stri
         changed = False
         for container in _all_containers(spec):
             if _has_xavier_env(container):
-                pod_name = metadata.get("name", "unknown")
-                changed |= set_env_var_if_not_exists(container, "PERCLIENTSERVERLABEL", getserverlabel(pod_name))
+                pod_name = metadata.get("name")
+                perclient_label = getserverlabel(pod_name) if pod_name else "unknown"
+                changed |= set_env_var_if_not_exists(container, "PERCLIENTSERVERLABEL", perclient_label)
         return changed
 
     if xaviercfg is None:
@@ -612,6 +613,8 @@ def create_server_deployment_spec(
         deployment["spec"]["template"]["spec"]["serviceAccountName"] = spec["serviceAccountName"]
     if spec.get("imagePullSecrets"):
         deployment["spec"]["template"]["spec"]["imagePullSecrets"] = copy.deepcopy(spec["imagePullSecrets"])
+    if spec.get("runtimeClassName"):
+        deployment["spec"]["template"]["spec"]["runtimeClassName"] = spec["runtimeClassName"]
 
     copy_allowed_volumes_and_mounts(deployment["spec"]["template"]["spec"], spec, xavier_container)
 
@@ -713,7 +716,12 @@ def build_desired_server_deployments(
 ) -> dict[str, dict[str, Any] | None]:
     desired: dict[str, dict[str, Any] | None] = {}
     metadata, spec, xaviercfg = get_metadata_spec(obj, strict=True)
-    if metadata is not None and spec is not None and xaviercfg is not None:
+    if (
+        metadata is not None
+        and spec is not None
+        and xaviercfg is not None
+        and not _is_parent_labeled_pod(metadata)
+    ):
         xavierconfig = merge_configmap_config(core_api, xaviercfg, metadata.get("namespace", "default"))
         for stageobj in xavierconfig.get("serverstages", []):
             if stageobj.get("perclient", False) and obj.get("kind") != "Pod":

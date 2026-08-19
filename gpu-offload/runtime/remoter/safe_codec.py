@@ -214,9 +214,14 @@ def _encode_value(
     if depth > limits.max_nesting:
         raise CodecLimitsError(f"nesting depth {depth} exceeds max_nesting={limits.max_nesting}")
 
-    if value is None or isinstance(value, (bool, float)):
+    if value is None:
         return value
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, float):
+        return float(value)
     if isinstance(value, int):
+        value = int(value)
         if -(1 << 63) <= value <= (1 << 64) - 1:
             return value
         magnitude = abs(value).to_bytes((abs(value).bit_length() + 7) // 8, "big")
@@ -229,10 +234,11 @@ def _encode_value(
     if isinstance(value, str):
         if len(value) > limits.max_str_length:
             raise CodecLimitsError(f"string length {len(value)} exceeds max_str_length={limits.max_str_length}")
-        return value
+        return str(value)
     if isinstance(value, bytes):
         if len(value) > limits.max_bytes_length:
             raise CodecLimitsError(f"bytes length {len(value)} exceeds max_bytes_length={limits.max_bytes_length}")
+        value = bytes(value)
         if len(value) >= _BLOB_THRESHOLD:
             blob_index = len(blobs)
             blobs.append(value)

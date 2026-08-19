@@ -12,6 +12,7 @@ import sys
 import uuid
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
+from pathlib import PurePath
 from threading import Lock
 from typing import Any
 
@@ -177,13 +178,15 @@ def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None, limit
 
 def to_dict(obj: Any) -> Any:
     """Recursively convert ``obj`` into JSON friendly primitives."""
+    if isinstance(obj, enum.Enum):
+        return {TYPE_KEY: _qualname(type(obj)), VALUE_KEY: obj.value}
+    if isinstance(obj, PurePath):
+        return {TYPE_KEY: _qualname(type(obj)), VALUE_KEY: str(obj)}
     if isinstance(obj, _PRIMITIVES):
         return obj
     tensor_data = _tensor_to_dict(obj)
     if tensor_data is not None:
         return tensor_data
-    if isinstance(obj, enum.Enum):
-        return {TYPE_KEY: _qualname(type(obj)), VALUE_KEY: obj.value}
     if isinstance(obj, (datetime, date)):
         return {TYPE_KEY: _qualname(type(obj)), VALUE_KEY: obj.isoformat()}
     if isinstance(obj, (list, tuple, set)):

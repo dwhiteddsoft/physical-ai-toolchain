@@ -52,9 +52,9 @@ cat model.safetensors.part.* > model.safetensors
 
 > [!NOTE]
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while another
-> offload example holds the device, so scale that example's client and server deployments to
-> zero first (for example `first-run-client` and `first-run-client-remote-server-nvidia` in
-> `gpu-offload-demo`), or tear it down.
+> offload example holds the device, and scaling that example down is not enough — the
+> controller recreates a server stage for as long as its client deployment exists. Uninstall
+> the other example first (for example `mise run 90-teardown` for the first-run demo).
 
 ## 🚀 Run
 

@@ -37,7 +37,7 @@ floats, camera frames as JPEG bytes, and the action as floats.
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
 | GPU node            | 16 GB VRAM or more, with the NVIDIA device plugin advertising `nvidia.com/gpu`                                                                        |
 | Cluster runtime     | `k3s` on the GPU host: the checkpoint is exposed through a hostPath `PersistentVolume`, which a `kind` node container cannot see without extra mounts |
-| `gpu-offload` chart | Installed cluster-wide (`mise run offload-43-install-controller`)                                                                                     |
+| `gpu-offload` chart | Installed cluster-wide (`mise run d-offload-43-install-controller`)                                                                                     |
 | Trained checkpoint  | A pi05 checkpoint directory on the node holding `config.json`, `model.safetensors`, and the saved processor pipelines                                 |
 | HuggingFace cache   | The gated `google/paligemma-3b-pt-224` tokenizer cached on the node; the pods run with `HF_HUB_OFFLINE=1`                                             |
 | UR10e               | Only for real motion; dry-run mode needs no robot                                                                                                     |
@@ -54,7 +54,7 @@ cat model.safetensors.part.* > model.safetensors
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while another
 > offload example holds the device, and scaling that example down is not enough — the
 > controller recreates a server stage for as long as its client deployment exists. Uninstall
-> the other example first (for example `mise run 90-teardown` for the first-run demo).
+> the other example first (for example `mise run f-30-teardown` for the first-run demo).
 
 ## 🚀 Run
 
@@ -62,7 +62,7 @@ cat model.safetensors.part.* > model.safetensors
 
    ```bash
    cd gpu-offload
-   mise run env-init
+   mise run a-env-init
    ```
 
    Then set `PI05_MODEL_HOST_PATH` and `PI05_HF_CACHE_HOST_PATH` in `.env`. Both default
@@ -72,10 +72,10 @@ cat model.safetensors.part.* > model.safetensors
 2. Build, load, deploy, and verify:
 
    ```bash
-   mise run pi05-40-build-image
-   mise run pi05-41-load-image
-   mise run pi05-50-deploy
-   mise run pi05-51-check-inference
+   mise run e-pi05-40-build-image
+   mise run e-pi05-41-load-image
+   mise run e-pi05-50-deploy
+   mise run e-pi05-51-check-inference
    ```
 
    `pi05-50-deploy` installs with `policy.dryRun=true` unless `PI05_DRY_RUN=false`.
@@ -85,7 +85,7 @@ cat model.safetensors.part.* > model.safetensors
 3. Remove the workloads when finished. The checkpoint on the node is untouched:
 
    ```bash
-   mise run pi05-90-teardown
+   mise run e-pi05-90-teardown
    ```
 
 ## ⚙️ Configuration

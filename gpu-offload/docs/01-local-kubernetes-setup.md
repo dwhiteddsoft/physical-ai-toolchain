@@ -26,12 +26,12 @@ Run all tasks from the `gpu-offload` directory:
 ```bash
 cd gpu-offload
 mise trust
-mise run detect
-mise run setup
-mise run verify
+mise run a-detect
+mise run f-10-setup
+mise run f-20-verify
 ```
 
-`mise run detect` prints the resolved platform before anything changes:
+`mise run a-detect` prints the resolved platform before anything changes:
 
 ```text
 Platform:          baremetal-nvidia (auto-detected)
@@ -416,7 +416,7 @@ nvidia-ctk cdi list
 Install k3s and register its kubeconfig context:
 
 ```bash
-mise run cluster-20-create
+mise run c-cluster-20-create
 ```
 
 The task pins the k3s version, verifies the installer checksum, and merges the kubeconfig as the context `gpu-offload-k3s`. It renames the cluster, user, and context away from k3s's default name of `default` so a later reinstall replaces the entry instead of merging against a stale certificate authority.
@@ -424,7 +424,7 @@ The task pins the k3s version, verifies the installer checksum, and merges the k
 ### Register the GPU
 
 ```bash
-mise run cluster-30-gpu-enable
+mise run c-cluster-30-gpu-enable
 ```
 
 This makes the NVIDIA runtime the containerd default and installs the NVIDIA device plugin.
@@ -451,7 +451,7 @@ sudo grep default_runtime_name /var/lib/rancher/k3s/agent/etc/containerd/config.
 ### Verify Kubernetes GPU Access
 
 ```bash
-mise run cluster-31-gpu-check
+mise run c-cluster-31-gpu-check
 ```
 
 The pod log must list the NVIDIA adapter, and the node must report `nvidia.com/gpu: 1` as allocatable. Continue to the [bare-metal NVIDIA offload](./02-first-local-offload.md).
@@ -461,11 +461,11 @@ The pod log must list the NVIDIA adapter, and the node must report `nvidia.com/g
 k3s installs as a systemd service that is enabled by default. Change that without uninstalling:
 
 ```bash
-mise run cluster-82-service-disable
-mise run cluster-81-service-enable
+mise run c-cluster-82-service-disable
+mise run c-cluster-81-service-enable
 ```
 
-Both tasks leave the cluster running and report the resulting boot and runtime state. Use `mise run cluster-80-stop` and `mise run cluster-70-start` to stop or start the running cluster.
+Both tasks leave the cluster running and report the resulting boot and runtime state. Use `mise run c-cluster-80-stop` and `mise run c-cluster-70-start` to stop or start the running cluster.
 
 ## Manage Existing Clusters
 
@@ -534,7 +534,7 @@ kubectl -n gpu-offload-demo patch deployment first-run-client-remote-server-nvid
   --patch '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 ```
 
-`mise run offload-50-deploy` applies this automatically whenever the GPU path is active.
+`mise run d-offload-50-deploy` applies this automatically whenever the GPU path is active.
 
 ### Reinstalling k3s fails TLS verification
 
@@ -550,7 +550,7 @@ A previous install left a cluster entry holding the old certificate authority, a
 kubectl config delete-context gpu-offload-k3s
 kubectl config delete-cluster default
 kubectl config delete-user default
-mise run cluster-20-create
+mise run c-cluster-20-create
 ```
 
 ### Admission fails with a 502 from the webhook
@@ -649,7 +649,7 @@ kubectl wait \
 Remove the demo and controller while leaving the cluster installed and running:
 
 ```bash
-mise run teardown
+mise run f-30-teardown
 ```
 
 ### Delete the Cluster
@@ -657,10 +657,10 @@ mise run teardown
 Remove the workloads and the cluster itself:
 
 ```bash
-mise run teardown-all
+mise run f-40-teardown-all
 ```
 
-On the bare-metal path this uninstalls k3s through `/usr/local/bin/k3s-uninstall.sh` and removes the `gpu-offload-k3s` kubeconfig entries. Prefer `mise run cluster-82-service-disable` when the goal is only to stop k3s from starting on boot.
+On the bare-metal path this uninstalls k3s through `/usr/local/bin/k3s-uninstall.sh` and removes the `gpu-offload-k3s` kubeconfig entries. Prefer `mise run c-cluster-82-service-disable` when the goal is only to stop k3s from starting on boot.
 
 ### Ref 90: Tear Down the CPU Cluster
 

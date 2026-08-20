@@ -42,6 +42,11 @@ For a zero-to-verification Podman and kind walkthrough, start with [docs/README.
    robot running the unmodified `ur10e-single` deployment with the SDK layered into its
    image through `sitecustomize`
 
+   The `ur10e-single` example is the one with a single-command hardware demo. Once its
+   checkpoint and registry are set up, `mise run g-ur10e-52-demo` deploys the control
+   loop, offloads the Pi0.5 policy to a GPU stage pod, drives the arm through the task,
+   and homes it again.
+
 ## ⚙️ Configuration
 
 Workload opt-in requires three signals:

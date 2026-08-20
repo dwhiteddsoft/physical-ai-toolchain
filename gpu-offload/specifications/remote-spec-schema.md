@@ -80,11 +80,11 @@ Each entry is a single-key map: the key is a fully-qualified function path, valu
 selects the target stage and declares instancing semantics. Calls execute
 transparently in the stage pod.
 
-| Field            | Type    | Required | Meaning                                                            |
-|------------------|---------|----------|--------------------------------------------------------------------|
-| _(map key)_      | string  | Yes      | Path in `module.path//function` or `module.path/Class/method` form |
+| Field            | Type    | Required | Meaning                                                                                                      |
+|------------------|---------|----------|--------------------------------------------------------------------------------------------------------------|
+| _(map key)_      | string  | Yes      | Path in `module.path//function` or `module.path/Class/method` form                                           |
 | `singleinstance` | boolean | No       | `true`: called once, then the first result is memoized and returned to every later caller; `false`: per-call |
-| `remoteloc`      | string  | Yes      | Target `serverstages` entry `name`                                 |
+| `remoteloc`      | string  | Yes      | Target `serverstages` entry `name`                                                                           |
 
 Set `singleinstance: true` on functions that load heavy resources so the model
 loads once in the stage pod and every call reuses it.

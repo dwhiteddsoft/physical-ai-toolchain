@@ -213,17 +213,18 @@ the same way, so `UR10E_CHECKPOINT_PATH` and `HF_HOME` resolve identically on bo
 | `Containerfile`                | Workload image with the remoter SDK and `sitecustomize` layered in |
 | `templates/manifests.yaml.tpl` | ServiceAccount, RBAC, volumes, ConfigMap, and control Deployment   |
 | `scripts/run-headless-host.sh` | Runs `headless` mode on the host against the ur10e-single venv     |
+| `scripts/demo.sh`              | Deploys, drives the arm, and follows the run until it homes        |
 
 ## 🔍 Troubleshooting
 
-| Symptom                                                     | Cause                                                                                       |
-|-------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| Server pod stays `Pending` on `Insufficient nvidia.com/gpu` | Another example still owns the device; uninstall its release rather than scaling it down    |
-| `ImagePullBackOff` on `localhost:5000/...`                  | The registry is not running, or k3s was not restarted after the mirror was written          |
-| `unsupported type ...; register an explicit adapter`        | A NumPy array or other unsupported value reached the wire; convert it before the call       |
-| No `loaded` event after several minutes                     | The checkpoint volume is empty, or the tokenizer is missing from the node HuggingFace cache |
-| `CodecLimitsError` on `get_action`                          | The observation exceeds the 8 MiB encoded ceiling; reduce camera count or resolution        |
-| `KeyError: 'DISPLAY'` at import                             | Something imported the ur10e-single teleoperator; only `headless` mode stubs `pyautogui`    |
-| The arm never moves in `headless` mode                      | `UR10E.active` is still false; homing must complete before servoJ is unlocked               |
-| The action is identical on every step                       | `singleinstance: true` was set on `get_action`; it memoizes the first result and never re-runs the call |
+| Symptom                                                     | Cause                                                                                                                            |
+|-------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| Server pod stays `Pending` on `Insufficient nvidia.com/gpu` | Another example still owns the device; uninstall its release rather than scaling it down                                         |
+| `ImagePullBackOff` on `localhost:5000/...`                  | The registry is not running, or k3s was not restarted after the mirror was written                                               |
+| `unsupported type ...; register an explicit adapter`        | A NumPy array or other unsupported value reached the wire; convert it before the call                                            |
+| No `loaded` event after several minutes                     | The checkpoint volume is empty, or the tokenizer is missing from the node HuggingFace cache                                      |
+| `CodecLimitsError` on `get_action`                          | The observation exceeds the 8 MiB encoded ceiling; reduce camera count or resolution                                             |
+| `KeyError: 'DISPLAY'` at import                             | Something imported the ur10e-single teleoperator; only `headless` mode stubs `pyautogui`                                         |
+| The arm never moves in `headless` mode                      | `UR10E.active` is still false; homing must complete before servoJ is unlocked                                                    |
+| The action is identical on every step                       | `singleinstance: true` was set on `get_action`; it memoizes the first result and never re-runs the call                          |
 | The client hangs in `load()` and the stage sends no result  | A terminating client claimed the single-instance slot; scale the client to zero and wait for deletion before replacing the stage |

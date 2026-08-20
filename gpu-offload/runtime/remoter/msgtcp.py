@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import struct
-
-from . import msgsock
 import socket
 import socketserver
+import struct
 import threading
-from typing import Callable
+from collections.abc import Callable
+
+from . import msgsock
 from .msgsock import Messenger, logger
+
+_RECEIVE_CHUNK_BYTES = 256 * 1024
+
 
 class MessengerTCP(Messenger):
     GetLen = 0
@@ -28,23 +31,23 @@ class MessengerTCP(Messenger):
             startrecvthread = True # for client side, start recv thread
             logger.info(f"Client endpoint {sock.getsockname()} connected to server at {ep}", color='cyan')
 
+        self.sock = sock
         super().__init__(ep, initfn, handlefn, closefn)
         self.state = MessengerTCP.GetLen
-        self.sock = sock
-        self.curmsg = b''
+        self.curmsg = bytearray()
         self.ep = ep
         if startrecvthread:
             threading.Thread(target=self.recvthread, daemon=True).start()
 
     def _networkrecv(self):
         try:
-            return self.sock.recv(4096) # receive up to 4096 bytes at a time
-        except socket.error as e:
+            return self.sock.recv(_RECEIVE_CHUNK_BYTES)
+        except OSError as e:
             logger.debug(f"Socket error on recv {e}")
             return b'' # indicate connection closed or error by returning empty bytes
 
     def _ingestrecvdata(self, data: bytes):
-        self.curmsg += data
+        self.curmsg.extend(data)
 
     def _handlerecvbytes(self) -> tuple[bool, bool, bytes|None]:
         while True:
@@ -53,13 +56,13 @@ class MessengerTCP(Messenger):
                     return True, False, None # not enough data to get length yet
                 self.msglen = int.from_bytes(self.curmsg[:4], 'big')
                 logger.debug(f"Received message length from {self.ep}: {self.msglen}")
-                self.curmsg = self.curmsg[4:]
+                del self.curmsg[:4]
                 self.state = MessengerTCP.GetData
             elif self.state == MessengerTCP.GetData:
                 if len(self.curmsg) < self.msglen:
                     return True, False, None # not enough data to get full message yet
-                msg = self.curmsg[:self.msglen]
-                self.curmsg = self.curmsg[self.msglen:]
+                msg = bytes(self.curmsg[:self.msglen])
+                del self.curmsg[:self.msglen]
                 self.state = MessengerTCP.GetLen
                 return True, True, msg
             else:
@@ -69,11 +72,11 @@ class MessengerTCP(Messenger):
     def _close(self):
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
-        except socket.error as e:
+        except OSError as e:
             logger.debug(f"Socket error on shutdown {e}")
         try:
             self.sock.close()
-        except socket.error as e:
+        except OSError as e:
             logger.debug(f"Socket error on close {e}")
 
     def _sendmessage(self, message: list[bytes]) -> int|None:

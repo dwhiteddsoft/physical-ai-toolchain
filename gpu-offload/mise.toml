@@ -201,6 +201,10 @@ run = "examples/ur10e-single/scripts/deploy.sh"
 description = "Verify that the policy loaded on the GPU stage and returns actions"
 run = "examples/ur10e-single/scripts/check-inference.sh"
 
+[tasks."g-ur10e-52-demo"]
+description = "Demo: run the Pi0.5 policy on the GPU stage and drive the UR10e end to end"
+run = "examples/ur10e-single/scripts/demo.sh"
+
 [tasks."g-ur10e-90-teardown"]
 description = "Remove the ur10e-single workloads and their host-path volumes"
 run = "examples/ur10e-single/scripts/teardown.sh"

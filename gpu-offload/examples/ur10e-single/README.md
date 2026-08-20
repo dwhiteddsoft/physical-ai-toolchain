@@ -110,7 +110,18 @@ moves toward that limit.
    server-stage pod, that CUDA was available there, that the control pod received an
    action, and that only the server stage holds a GPU allocation.
 
-4. Remove the workloads when finished. The checkpoint on the node is untouched:
+4. Drive the arm. `g-ur10e-52-demo` is the one-command demo: it deploys in `headless`
+   mode with USB passthrough, then follows the run until the arm has homed again.
+
+   ```bash
+   mise run g-ur10e-52-demo
+   ```
+
+   The UR10e moves to its home pose as soon as the policy loads, runs the policy for
+   `UR10E_MAX_STEPS` steps (80 by default), and homes again on the way out. Keep the
+   workspace clear and stay on the e-stop.
+
+5. Remove the workloads when finished. The checkpoint on the node is untouched:
 
    ```bash
    mise run g-ur10e-90-teardown

@@ -61,6 +61,10 @@ run = "scripts/verify-nvidia-access.sh"
 description = "Check local tools and render the GPU offload Helm chart"
 run = "scripts/preflight-check.sh"
 
+[tasks."b-host-20-registry"]
+description = "Start the host-local image registry and register it as a k3s mirror"
+run = "scripts/registry-start.sh"
+
 # ==============================================================================
 # Cluster lifecycle
 # ==============================================================================
@@ -164,6 +168,30 @@ run = "examples/pi05/scripts/check-inference.sh"
 [tasks."e-pi05-90-teardown"]
 description = "Remove the pi05 workloads and their host-path volumes"
 run = "examples/pi05/scripts/teardown.sh"
+
+# ==============================================================================
+# ur10e-single example
+# ==============================================================================
+
+[tasks."g-ur10e-40-build-image"]
+description = "Build the ur10e-single workload image with the remoter SDK layered in"
+run = "examples/ur10e-single/scripts/build-image.sh"
+
+[tasks."g-ur10e-41-push-image"]
+description = "Push the ur10e-single image to the host-local registry"
+run = "examples/ur10e-single/scripts/push-image.sh"
+
+[tasks."g-ur10e-50-deploy"]
+description = "Deploy the ur10e-single control loop and its GPU server stage"
+run = "examples/ur10e-single/scripts/deploy.sh"
+
+[tasks."g-ur10e-51-check-inference"]
+description = "Verify that the policy loaded on the GPU stage and returns actions"
+run = "examples/ur10e-single/scripts/check-inference.sh"
+
+[tasks."g-ur10e-90-teardown"]
+description = "Remove the ur10e-single workloads and their host-path volumes"
+run = "examples/ur10e-single/scripts/teardown.sh"
 
 # ==============================================================================
 # Orchestration

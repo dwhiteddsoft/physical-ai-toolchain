@@ -32,7 +32,7 @@ Adoption is modeled as six graduated tiers (T0-T5), each a legitimate stopping p
 
 | Tier                | Scope                                                     | Quick start                                                | Architecture                                                   |
 |---------------------|-----------------------------------------------------------|------------------------------------------------------------|----------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Laptop + 1 robot, zero cloud, optional local Kubernetes  | [Tier 0 — Dev](recipes/tier-0-dev/README.md)               | [T0 — Dev](contributing/architecture.md#t0--dev)               |
+| **T0 — Dev** ⭐      | Laptop + 1 robot, zero cloud, optional local Kubernetes   | [Tier 0 — Dev](recipes/tier-0-dev/README.md)               | [T0 — Dev](contributing/architecture.md#t0--dev)               |
 | **T1 — Lab**        | One site, a few robots, shared GPU; first cloud storage   | [Tier 1 — Lab](recipes/tier-1-lab/README.md)               | [T1 — Lab](contributing/architecture.md#t1--lab)               |
 | **T2 — Pilot** ✅    | One site at scale; cloud training default                 | [Tier 2 — Pilot](recipes/tier-2-pilot/README.md)           | [T2 — Pilot](contributing/architecture.md#t2--pilot)           |
 | **T3 — Production** | Single-site declarative deploy (local k3s + Flux, no Arc) | [Tier 3 — Production](recipes/tier-3-production/README.md) | [T3 — Production](contributing/architecture.md#t3--production) |

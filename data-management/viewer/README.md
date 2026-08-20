@@ -206,16 +206,16 @@ Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before
 launching the backend manually. Install `vlm-judge-local` when using the
 in-process `qwen3-vl` backend without `start.sh`.
 
-| Variable              | Default                     | Description                                                       |
-|-----------------------|-----------------------------|-------------------------------------------------------------------|
-| `VLM_JUDGE_ENABLED`   | `false`                     | Mount the `/judge` router                                         |
-| `VLM_JUDGE_BACKEND`   | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo` |
-| `VLM_JUDGE_MODEL_ID`  | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                  |
-| `VLM_JUDGE_BASE_URL`  | —                           | OpenAI-compatible server URL (`openai-compat` only)              |
-| `VLM_JUDGE_API_KEY`   | —                           | Bearer token for the remote backend                              |
-| `VLM_JUDGE_N_FRAMES`  | `12`                        | Frames sampled per episode                                       |
-| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                  | Process-reward method: `gvl` (shuffle-and-rank) or `chronological` |
-| `VLM_JUDGE_CACHE_DIR` | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
+| Variable                   | Default                     | Description                                                                           |
+|----------------------------|-----------------------------|---------------------------------------------------------------------------------------|
+| `VLM_JUDGE_ENABLED`        | `false`                     | Mount the `/judge` router                                                             |
+| `VLM_JUDGE_BACKEND`        | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`           |
+| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                                      |
+| `VLM_JUDGE_BASE_URL`       | —                           | OpenAI-compatible server URL (`openai-compat` only)                                   |
+| `VLM_JUDGE_API_KEY`        | —                           | Bearer token for the remote backend                                                   |
+| `VLM_JUDGE_N_FRAMES`       | `12`                        | Frames sampled per episode                                                            |
+| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                       | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                    |
+| `VLM_JUDGE_CACHE_DIR`      | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
 
 > [!NOTE]
 > **Process-reward method (`VLM_JUDGE_PROCESS_METHOD`).** The per-frame progress
@@ -258,13 +258,13 @@ uv run --project ../../evaluation/vlm_judge --extra api --extra qwen3-vl \
 
 The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../evaluation/vlm_judge/openai_shim.py)):
 
-| Variable                          | Default                     | Description                                                            |
-|-----------------------------------|-----------------------------|------------------------------------------------------------------------|
-| `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback             |
-| `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                            |
-| `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                          |
-| `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                                |
-| `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                            |
+| Variable                          | Default                     | Description                                                           |
+|-----------------------------------|-----------------------------|-----------------------------------------------------------------------|
+| `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback            |
+| `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                           |
+| `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                         |
+| `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                               |
+| `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                           |
 | `VLM_SHIM_ALLOW_REMOTE_IMAGES`    | `false`                     | Fetch `http(s)` image URLs server-side; off restricts to `data:` URIs |
 | `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` | `10`                        | Per-fetch timeout (seconds) when remote images are enabled            |
 

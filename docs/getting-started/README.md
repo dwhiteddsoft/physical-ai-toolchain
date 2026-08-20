@@ -20,14 +20,14 @@ The default path starts on a laptop, not in the cloud. Begin with [Start Here �
 
 Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum infrastructure needed to complete the full training lifecycle: capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot. Each tier is a legitimate stopping point. Start at T0 and graduate only when a concrete trigger forces it.
 
-| Tier                | When to start here                                                   | Graduate when…                                                                                                                                             | Quick start                                                   |
-|---------------------|----------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and no required Kubernetes. | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                             | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
-| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.       | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                        | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
-| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.   | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.       | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
-| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc). | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                    | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
-| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.    | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
-| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.  | Available after the roadmap implementation lands.                                                                                                          | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
+| Tier                | When to start here                                                     | Graduate when…                                                                                                                                                    | Quick start                                                   |
+|---------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and no required Kubernetes. | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                                      | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.         | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                               | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.     | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.              | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc).   | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                           | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.      | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.    | Available after the roadmap implementation lands.                                                                                                                 | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
 
 ⭐ default · ✅ recommended production
 
@@ -63,13 +63,13 @@ The default starting path is **one laptop and one robot**, with zero cloud and n
 
 ## 🚀 Guides
 
-| Guide                                      | Description                                                |
-|--------------------------------------------|------------------------------------------------------------|
-| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud     |
-| [Choose Your Tier](#choose-your-tier)      | Pick a tier and see its graduation triggers                |
+| Guide                                      | Description                                                    |
+|--------------------------------------------|----------------------------------------------------------------|
+| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud         |
+| [Choose Your Tier](#choose-your-tier)      | Pick a tier and see its graduation triggers                    |
 | [Quickstart](quickstart.md)                | Cloud path (T2 — Pilot): clone to the first cloud training job |
-| Architecture Overview (coming soon)        | System topology, components, and data flow                 |
-| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO               |
+| Architecture Overview (coming soon)        | System topology, components, and data flow                     |
+| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO                   |
 
 ## ⏱️ Time and Cost
 

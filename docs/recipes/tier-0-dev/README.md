@@ -20,8 +20,8 @@ surfaces it.
 
 | Concern     | What you need                                                                           |
 |-------------|-----------------------------------------------------------------------------------------|
-| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.                |
-| Edge infra  | ROS 2 and Docker. Local kind and Helm are optional; Arc, Flux, and PVC are excluded.     |
+| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.               |
+| Edge infra  | ROS 2 and Docker. Local kind and Helm are optional; Arc, Flux, and PVC are excluded.    |
 | Cloud infra | **None.** No Azure subscription, no storage account, no AzureML workspace.              |
 | Tooling     | Python 3.12+ with [`uv`](https://docs.astral.sh/uv/), Node.js 18+ (for the dataviewer). |
 | Tracking    | Optional. Training outputs are written to local disk; hosted tracking enters at T2.     |

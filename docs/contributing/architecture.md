@@ -21,14 +21,14 @@ Each tier states the minimum edge and cloud infrastructure required to reach a c
 
 `T0` is the documented **default** starting path. `T2` is the **recommended production** path. `T3`–`T5` are **advanced**. The pairing of stable ID and stage name (`T# — Name`) is canonical; see the [Tier Model](../design/tier-model.md#canonical-tier-table) for the authoritative table.
 
-| T# | Stage name | Operator reach / scope                   | Edge infra              | Cloud infra                                        | Status                       |
-|----|------------|------------------------------------------|-------------------------|----------------------------------------------------|------------------------------|
-| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker; optional local Kubernetes | None                                    | Shipped (default)            |
-| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob account (optional AzureML / MLflow)       | Shipped                      |
-| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker      | AzureML + storage + model registry + MLflow        | Shipped (recommended)        |
-| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD      | Same as T2 (no Arc)                                | Advanced                     |
-| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating | T2 + cross-site connectivity / identity            | Advanced (fleet delivery)    |
-| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations  | + Fabric Real-Time Intelligence + drift/retraining | Roadmap (fleet intelligence) |
+| T# | Stage name | Operator reach / scope                   | Edge infra                                | Cloud infra                                        | Status                       |
+|----|------------|------------------------------------------|-------------------------------------------|----------------------------------------------------|------------------------------|
+| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker; optional local Kubernetes | None                                               | Shipped (default)            |
+| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)                     | One Blob account (optional AzureML / MLflow)       | Shipped                      |
+| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker                        | AzureML + storage + model registry + MLflow        | Shipped (recommended)        |
+| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD                        | Same as T2 (no Arc)                                | Advanced                     |
+| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating                   | T2 + cross-site connectivity / identity            | Advanced (fleet delivery)    |
+| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations                    | + Fabric Real-Time Intelligence + drift/retraining | Roadmap (fleet intelligence) |
 
 ### Boundaries
 
@@ -175,10 +175,10 @@ backend operator to a separate Ubuntu K3s cluster. The backend operator
 initiates an outbound connection to OSMO, so the AKS service does not need to
 initiate connections into the HiL site.
 
-| Mode | OSMO endpoint | Edge requirement | Use |
-|------|---------------|------------------|-----|
-| Public | Dedicated trusted HTTPS ingress or load balancer | Outbound Internet access and endpoint policy | Simplest onboarding path without VPN |
-| Private | Internal OSMO load balancer over VPN/private routing | Route and private DNS resolution from the Ubuntu site | Preferred restricted-network path |
+| Mode    | OSMO endpoint                                        | Edge requirement                                      | Use                                  |
+|---------|------------------------------------------------------|-------------------------------------------------------|--------------------------------------|
+| Public  | Dedicated trusted HTTPS ingress or load balancer     | Outbound Internet access and endpoint policy          | Simplest onboarding path without VPN |
+| Private | Internal OSMO load balancer over VPN/private routing | Route and private DNS resolution from the Ubuntu site | Preferred restricted-network path    |
 
 Making the AKS API server public does not expose the OSMO application endpoint.
 Public mode requires a separate, authenticated HTTPS OSMO endpoint. Private
@@ -298,9 +298,9 @@ A complete example pipeline demonstrates the full path from trained checkpoint t
 
 Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines for trained policies. SiL runs locally at `T0`; both approaches use Isaac Sim to emulate the target robot, with the trained policy controlling the simulation.
 
-| Approach | Infrastructure                                                                                         | Policy Host                     |
-|----------|--------------------------------------------------------------------------------------------------------|---------------------------------|
-| SiL      | Any available compute that can serve the policy as an inference endpoint                               | AzureML managed endpoint or AKS |
+| Approach | Infrastructure                                                                                                  | Policy Host                     |
+|----------|-----------------------------------------------------------------------------------------------------------------|---------------------------------|
+| SiL      | Any available compute that can serve the policy as an inference endpoint                                        | AzureML managed endpoint or AKS |
 | HiL      | Target deployment hardware, including an Ubuntu K3s HiL host, running the containerized TensorRT or ONNX policy | Edge device matching production |
 
 Evaluation metrics capture to:

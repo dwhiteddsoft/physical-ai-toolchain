@@ -207,12 +207,12 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 > [!IMPORTANT]
 > Autonomy (`T5.0`–`T5.3`) is a **different axis** from infrastructure reach (`T0`–`T4`). `T0`–`T4` scale on *infrastructure reach* (sites, GPU, collaboration); `T5.0`–`T5.3` scale on *decision authority / loop closure*. They are orthogonal: a single-site `T3` operator can sit at `T5.0`, and a multi-site `T4` operator can remain fully manual. The autonomy stages are how much of the retraining decision a human delegates, not more infrastructure to buy.
 
-| Rung | Decision authority                                                                     | Human role                            | Status       |
-|------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
-| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
-| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
-| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
+| Rung | Decision authority                                                                    | Human role                            | Status       |
+|------|---------------------------------------------------------------------------------------|---------------------------------------|--------------|
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.        | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when. | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                     | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.       | None (fully autonomous)               | Not built    |
 
 > [!WARNING]
 > Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset, and drift detection needs statistical power that only exists at fleet scale. `T5` should default to human-supervised (`T5.0`–`T5.1`), not closed-loop (`T5.3`). `T5.3` stays a roadmap direction, not a near-term target.

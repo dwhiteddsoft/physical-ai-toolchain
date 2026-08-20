@@ -1,6 +1,6 @@
 # ur10e-single with GPU inference offloaded by the mutating controller
 
-<!-- cspell:ignore paligemma -->
+<!-- cspell:ignore paligemma pyautogui teleoperator -->
 
 Runs the `ur10e-single` Pi0.5 deployment as a control container next to the UR10e while
 the policy executes in a GPU server-stage pod. The workload image is built with the
@@ -71,7 +71,7 @@ moves toward that limit.
 | `ur10e-single`      | Checked out beside this repository, or `UR10E_SOURCE_PATH` set to it                                                  |
 | Trained checkpoint  | A pi05 checkpoint directory on the node holding `config.json`, `model.safetensors`, and the saved processor pipelines |
 | HuggingFace cache   | The gated `google/paligemma-3b-pt-224` tokenizer cached on the node; the pods run with `HF_HUB_OFFLINE=1`             |
-| UR10e               | Only for `record` mode; `self-check` mode needs no robot                                                              |
+| UR10e               | Only for `headless` and `record` modes; `self-check` mode needs no robot                                              |
 
 > [!NOTE]
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while
@@ -118,16 +118,18 @@ moves toward that limit.
 
 ## ⚙️ Configuration
 
-| Value                       | Default                                                      | Purpose                                                               |
-|-----------------------------|--------------------------------------------------------------|-----------------------------------------------------------------------|
-| `policy.mode`               | `self-check`                                                 | `self-check` drives synthetic observations; `record` drives the UR10e |
-| `policy.task`               | `Pick up the large white gear and place it in the blue bin.` | Language instruction; pi05 was trained single-task on this string     |
-| `policy.fps`                | `10`                                                         | Training control frequency; the action chunk replays at this rate     |
-| `policy.nActionSteps`       | `50`                                                         | Actions consumed per predicted chunk                                  |
-| `robot.configPath`          | `/workspace/script/ur10e_config_demo.json`                   | Robot and camera configuration carried in the image                   |
-| `model.hostPath`            | none                                                         | Checkpoint directory on the node; required                            |
-| `huggingFaceCache.hostPath` | none                                                         | Tokenizer cache on the node; required                                 |
-| `image.registry`            | `localhost:5000`                                             | Host-local registry the cluster mirrors                               |
+| Value                       | Default                                                      | Purpose                                                                             |
+|-----------------------------|--------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `policy.mode`               | `self-check`                                                 | `self-check` drives synthetic observations; `headless` and `record` drive the UR10e |
+| `policy.task`               | `Pick up the large white gear and place it in the blue bin.` | Language instruction; pi05 was trained single-task on this string                   |
+| `policy.fps`                | `10`                                                         | Training control frequency; the action chunk replays at this rate                   |
+| `policy.nActionSteps`       | `50`                                                         | Actions consumed per predicted chunk                                                |
+| `robot.configPath`          | `/workspace/script/ur10e_config_demo.json`                   | Robot and camera configuration carried in the image                                 |
+| `model.hostPath`            | none                                                         | Checkpoint directory on the node; required                                          |
+| `huggingFaceCache.hostPath` | none                                                         | Tokenizer cache on the node; required                                               |
+| `image.registry`            | `localhost:5000`                                             | Host-local registry the cluster mirrors                                             |
+| `robot.logEvery`            | `50`                                                         | Emit one `action` event every N steps                                               |
+| `robot.debugInference`      | empty                                                        | When set, the GPU stage logs a per-call observation fingerprint and action          |
 
 > [!WARNING]
 > Running the loop at the wrong rate replays the action chunk too fast and causes
@@ -141,11 +143,29 @@ emits a `self_check_passed` event, then keeps cycling at `policy.fps`. The loop 
 deliberately: the controller reconciles the GPU stage against a live client, so a container
 that exits would tear the stage down and reload 7 GB on restart.
 
+`headless` drives the arm from a terminal with no display, no dataset, and no
+teleoperator. It moves the arm to the home pose, then runs the same per-step sequence the
+record loop performs — observation, dataset frame, offloaded inference, action — and
+returns the arm home when it stops. `Ctrl+C` and `SIGTERM` both exit through the homing
+path, and `--max-steps` bounds the run.
+
+The ur10e-single plugin builds a Gradio dashboard in `UR10E.__init__` and gates episode
+start on a button click, falling back to a blocking `input()` when the dashboard is
+unavailable; its package import also pulls in `pyautogui`, which resolves `DISPLAY` at
+import time. Headless mode replaces the dashboard and stubs `pyautogui`, so none of that
+reaches a container. It also homes directly rather than through the driver's `reset`
+action, which detours via the submissive pose at full speed.
+
 `record` runs the stock `lerobot-record` loop with inference redirected at three seams:
 `make_policy` and `make_pre_post_processors` return local stand-ins, and `predict_action`
 converts the observation and calls the remote `PolicyRunner`. The stand-ins exist because
 the record loop reads `policy.config.device` and `policy.config.use_amp` every cycle; a
 remote proxy would turn each read into a round trip. Robot and camera I/O are untouched.
+
+> [!NOTE]
+> The checkpoint sets `compile_model: true`, which costs roughly 200 s of `torch.compile`
+> autotuning on the first inference. `PolicyRunner` overrides it to `false` so the first
+> control cycle is predictable.
 
 ## 📦 Caching
 
@@ -177,10 +197,11 @@ the same way, so `UR10E_CHECKPOINT_PATH` and `HF_HOME` resolve identically on bo
 | Path                           | Content                                                            |
 |--------------------------------|--------------------------------------------------------------------|
 | `ur10e_offload.py`             | Offload seam; the class whose methods run on the GPU stage         |
-| `run_ur10e.py`                 | Control-loop entrypoint for both modes                             |
+| `run_ur10e.py`                 | Control-loop entrypoint for all three modes                        |
 | `remote.yaml`                  | Offload spec, mirrored into the ConfigMap the chart renders        |
 | `Containerfile`                | Workload image with the remoter SDK and `sitecustomize` layered in |
 | `templates/manifests.yaml.tpl` | ServiceAccount, RBAC, volumes, ConfigMap, and control Deployment   |
+| `scripts/run-headless-host.sh` | Runs `headless` mode on the host against the ur10e-single venv     |
 
 ## 🔍 Troubleshooting
 
@@ -191,3 +212,7 @@ the same way, so `UR10E_CHECKPOINT_PATH` and `HF_HOME` resolve identically on bo
 | `unsupported type ...; register an explicit adapter`        | A NumPy array or other unsupported value reached the wire; convert it before the call       |
 | No `loaded` event after several minutes                     | The checkpoint volume is empty, or the tokenizer is missing from the node HuggingFace cache |
 | `CodecLimitsError` on `get_action`                          | The observation exceeds the 8 MiB encoded ceiling; reduce camera count or resolution        |
+| `KeyError: 'DISPLAY'` at import                             | Something imported the ur10e-single teleoperator; only `headless` mode stubs `pyautogui`    |
+| The arm never moves in `headless` mode                      | `UR10E.active` is still false; homing must complete before servoJ is unlocked               |
+| The action is identical on every step                       | `singleinstance: true` was set on `get_action`; it memoizes the first result and never re-runs the call |
+| The client hangs in `load()` and the stage sends no result  | A terminating client claimed the single-instance slot; scale the client to zero and wait for deletion before replacing the stage |

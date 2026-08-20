@@ -10,21 +10,21 @@ GPU-offload porting.
 
 ## Upstream Snapshot
 
-| Field | Value |
-|---|---|
-| Repository | `microsoft/xavier` |
+| Field         | Value                                    |
+|---------------|------------------------------------------|
+| Repository    | `microsoft/xavier`                       |
 | Pinned commit | c914e88c4d65d5d99e9546c01a3c4def0ead39c5 |
 
 Key upstream files referenced and their disposition:
 
-| Upstream path | Disposition |
-|---|---|
-| platform/offload/controller/mutate.py | Imported as reference; adapted |
-| platform/offload/controller/client.yaml | Imported as example; retained |
-| platform/offload/*/helm/ | Imported as reference for schema |
-| platform/offload/nodeagent/* | Examined; intentionally excluded |
-| platform/offload/*/dockerbuild-* | Reviewed for patterns; Podman used instead |
-| platform/offload/*/dockerrun-* | Reviewed for patterns; Podman used instead |
+| Upstream path                           | Disposition                                |
+|-----------------------------------------|--------------------------------------------|
+| platform/offload/controller/mutate.py   | Imported as reference; adapted             |
+| platform/offload/controller/client.yaml | Imported as example; retained              |
+| platform/offload/*/helm/                | Imported as reference for schema           |
+| platform/offload/nodeagent/*            | Examined; intentionally excluded           |
+| platform/offload/*/dockerbuild-*        | Reviewed for patterns; Podman used instead |
+| platform/offload/*/dockerrun-*          | Reviewed for patterns; Podman used instead |
 
 ## Licensing and Permissions
 

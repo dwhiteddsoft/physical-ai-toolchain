@@ -36,8 +36,10 @@ remoteclasses:
   - "lerobot.processor.pipeline/DataProcessorPipeline":
       remoteloc: gpu
 remotefuncs:
-  # load reads roughly 7 GB of weights onto the GPU; singleinstance keeps one
-  # PolicyRunner per stage so every control cycle reuses the loaded policy.
+  # singleinstance means "call once on the stage, then memoize the result", so it
+  # belongs only on the calls whose result is the loaded policy itself. load reads
+  # roughly 7 GB of weights onto the GPU and every control cycle reuses the proxies
+  # it returns. reset and get_action must execute on every call.
   - "ur10e_offload/PolicyRunner/load":
       singleinstance: true
       remoteloc: gpu
@@ -45,8 +47,6 @@ remotefuncs:
       singleinstance: true
       remoteloc: gpu
   - "ur10e_offload/PolicyRunner/reset":
-      singleinstance: true
       remoteloc: gpu
   - "ur10e_offload/PolicyRunner/get_action":
-      singleinstance: true
       remoteloc: gpu

@@ -6,7 +6,9 @@ image:
   repository: gpu-offload-ur10e-single
   tag: local
   digest: ""
-  pullPolicy: IfNotPresent
+  # The tag is mutable and the registry is host-local, so the digest is rechecked
+  # on every pod start; IfNotPresent would pin the node to a stale build.
+  pullPolicy: Always
 
 imagePullSecrets: []
 
@@ -71,6 +73,27 @@ robot:
   episodeTimeS: "10"
   # Six UR10e joints plus one gripper value.
   stateDim: "7"
+  # headless mode. maxSteps of "0" runs until the pod is deleted; homeSpeed is the
+  # joint speed for the moves to the home pose taken before and after the run.
+  maxSteps: "0"
+  homeSpeed: "0.2"
+  # Log one action event every N steps. debugInference makes the GPU stage emit a
+  # per-call observation fingerprint, which separates a stalled control loop from a
+  # stalled policy.
+  logEvery: "50"
+  debugInference: ""
+  # The RealSense cameras are USB devices on the node. libuvc rebinds and reopens
+  # them at runtime, so the control container needs the whole USB bus rather than a
+  # fixed device node, plus the privileges to claim an interface on it.
+  #
+  # This applies to the control container only. The cameras stay client-side: the
+  # GPU stage receives decoded frames over the wire and never touches USB. The
+  # controller rejects hostPath volumes when copying to the server pod, so this
+  # volume is deliberately declared outside the propagated set.
+  usb:
+    enabled: false
+    hostPath: /dev/bus/usb
+    privileged: true
 
 clientResources:
   requests:

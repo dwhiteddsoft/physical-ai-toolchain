@@ -8,4 +8,4 @@ cd "$GPU_OFFLOAD_DIR"
 
 # The chart requests the image through the registry endpoint, so the cluster pulls
 # it from the host rather than loading it into the node image store.
-exec scripts/registry-push.sh gpu-offload-ur10e-single:local
+exec registry/registry-push.sh gpu-offload-ur10e-single:local

@@ -157,8 +157,9 @@ data:
       - "lerobot.processor.pipeline/DataProcessorPipeline":
           remoteloc: {{ .Values.serverStage.name }}
     remotefuncs:
-      # load reads roughly 7 GB of weights onto the GPU; singleinstance keeps one
-      # PolicyRunner per stage so every control cycle reuses the loaded policy.
+      # singleinstance means "call once on the stage, then memoize the result", so
+      # it belongs only on the calls whose result is the loaded policy itself.
+      # reset and get_action must execute on every call.
       - "ur10e_offload/PolicyRunner/load":
           singleinstance: true
           remoteloc: {{ .Values.serverStage.name }}
@@ -166,10 +167,8 @@ data:
           singleinstance: true
           remoteloc: {{ .Values.serverStage.name }}
       - "ur10e_offload/PolicyRunner/reset":
-          singleinstance: true
           remoteloc: {{ .Values.serverStage.name }}
       - "ur10e_offload/PolicyRunner/get_action":
-          singleinstance: true
           remoteloc: {{ .Values.serverStage.name }}
 ---
 apiVersion: apps/v1
@@ -214,6 +213,14 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-hf-cache
             readOnly: true
+{{- if .Values.robot.usb.enabled }}
+        # hostPath is legal on the client. The controller only rejects it when
+        # copying volumes into the generated server pod, which never sees USB.
+        - name: ur10e-usb
+          hostPath:
+            path: {{ .Values.robot.usb.hostPath | quote }}
+            type: Directory
+{{- end }}
       containers:
         - name: control
           image: {{ $image | quote }}
@@ -228,6 +235,14 @@ spec:
             - name: ur10e-hf-cache
               mountPath: {{ .Values.huggingFaceCache.mountPath }}
               readOnly: true
+{{- if .Values.robot.usb.enabled }}
+            - name: ur10e-usb
+              mountPath: {{ .Values.robot.usb.hostPath }}
+{{- end }}
+{{- if and .Values.robot.usb.enabled .Values.robot.usb.privileged }}
+          securityContext:
+            privileged: true
+{{- end }}
           env:
             - name: REMOTERPORT
               value: "30001"
@@ -257,6 +272,14 @@ spec:
               value: {{ .Values.robot.episodeTimeS | quote }}
             - name: UR10E_STATE_DIM
               value: {{ .Values.robot.stateDim | quote }}
+            - name: UR10E_MAX_STEPS
+              value: {{ .Values.robot.maxSteps | quote }}
+            - name: UR10E_HOME_SPEED
+              value: {{ .Values.robot.homeSpeed | quote }}
+            - name: UR10E_LOG_EVERY
+              value: {{ .Values.robot.logEvery | quote }}
+            - name: UR10E_DEBUG_INFERENCE
+              value: {{ .Values.robot.debugInference | quote }}
             - name: HF_HOME
               value: {{ .Values.huggingFaceCache.mountPath | quote }}
             - name: HF_HUB_OFFLINE

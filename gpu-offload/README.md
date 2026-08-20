@@ -132,23 +132,23 @@ flowchart TB
     client ===|"pod network"| server
 ```
 
-| Diagram label | Meaning |
-|---------------|---------|
+| Diagram label                        | Meaning                                                                                                                                                                                                                                                                       |
+|--------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Box containing a `gpu-offload/` path | Repository-owned artifact. The Helm chart renders RBAC, a `Service`, controller `Deployment`, TLS `Secret`, and `MutatingWebhookConfiguration`; runtime boxes are containers in client or server Pods; `remote.yaml` is mounted from a `ConfigMap`. This path defines no CRD. |
-| Kubernetes or NVIDIA component name | Cluster-supplied control plane, kubelet, container runtime, CNI, or externally installed device-plugin Pod or DaemonSet. |
-| Physical equipment | Robot hardware outside Kubernetes; it is not a Kubernetes resource. |
-| Ungrouped sequence participant | Operator-supplied application or model code running inside a client or server container. |
+| Kubernetes or NVIDIA component name  | Cluster-supplied control plane, kubelet, container runtime, CNI, or externally installed device-plugin Pod or DaemonSet.                                                                                                                                                      |
+| Physical equipment                   | Robot hardware outside Kubernetes; it is not a Kubernetes resource.                                                                                                                                                                                                           |
+| Ungrouped sequence participant       | Operator-supplied application or model code running inside a client or server container.                                                                                                                                                                                      |
 
 ### Repository artifact map
 
-| Diagram component | Repository artifact | Role |
-|-------------------|---------------------|------|
-| Control-plane chart | `helm/gpu-offload/` | Render RBAC, Service, controller Deployment, TLS, and admission registration resources |
-| Mutation controller | `controller/mutate.py`, `controller/Containerfile` | Package the controller Pod, patch opted-in workloads, and reconcile server Deployments |
-| Runtime SDK | `runtime/remoter/` | Run inside client and server containers for decoration, discovery, execution, and transport |
-| Runtime internals | `runtime/remoter/rmtconfigkube.py`, `runtime/remoter/autoremote.py`, `runtime/remoter/safe_codec.py`, `runtime/remoter/msgtcp.py` | Watch Pods, start the server, encode MessagePack, and communicate over TCP |
-| Offload configuration | `specifications/remote-spec-schema.md` | Define supported `remote.yaml` fields |
-| Runnable workloads | `examples/first-run/`, `examples/so101-real-hardware/`, `examples/pi05/`, `examples/ur10e-single/` | Provide client workloads, ConfigMaps, and offload boundaries |
+| Diagram component     | Repository artifact                                                                                                               | Role                                                                                        |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| Control-plane chart   | `helm/gpu-offload/`                                                                                                               | Render RBAC, Service, controller Deployment, TLS, and admission registration resources      |
+| Mutation controller   | `controller/mutate.py`, `controller/Containerfile`                                                                                | Package the controller Pod, patch opted-in workloads, and reconcile server Deployments      |
+| Runtime SDK           | `runtime/remoter/`                                                                                                                | Run inside client and server containers for decoration, discovery, execution, and transport |
+| Runtime internals     | `runtime/remoter/rmtconfigkube.py`, `runtime/remoter/autoremote.py`, `runtime/remoter/safe_codec.py`, `runtime/remoter/msgtcp.py` | Watch Pods, start the server, encode MessagePack, and communicate over TCP                  |
+| Offload configuration | `specifications/remote-spec-schema.md`                                                                                            | Define supported `remote.yaml` fields                                                       |
+| Runnable workloads    | `examples/first-run/`, `examples/so101-real-hardware/`, `examples/pi05/`, `examples/ur10e-single/`                                | Provide client workloads, ConfigMaps, and offload boundaries                                |
 
 ### Deployment and admission sequence
 
@@ -186,13 +186,13 @@ sequenceDiagram
 
 ### Runtime offload sequence
 
-| Participant | Host and Kubernetes form | Repository relationship |
-|-------------|--------------------------|-------------------------|
-| Robot | Physical robot site outside Kubernetes | Connects through operator-provided networking |
-| Client application and SDK | Processes in the same client container and Pod on a CPU worker node | Container includes `runtime/remoter/`; workload comes from `examples/` or operator manifests |
-| API server | Managed Kubernetes control plane process, not a Pod managed by this chart | External platform dependency |
-| GPU kubelet | Node service on the GPU worker, outside all Pods | External Kubernetes node component |
-| Server SDK and model | Processes in the same `remote-server` container and generated server Pod on a GPU worker node | Deployment generated by `controller/mutate.py`; container includes `runtime/remoter/` |
+| Participant                | Host and Kubernetes form                                                                      | Repository relationship                                                                      |
+|----------------------------|-----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Robot                      | Physical robot site outside Kubernetes                                                        | Connects through operator-provided networking                                                |
+| Client application and SDK | Processes in the same client container and Pod on a CPU worker node                           | Container includes `runtime/remoter/`; workload comes from `examples/` or operator manifests |
+| API server                 | Managed Kubernetes control plane process, not a Pod managed by this chart                     | External platform dependency                                                                 |
+| GPU kubelet                | Node service on the GPU worker, outside all Pods                                              | External Kubernetes node component                                                           |
+| Server SDK and model       | Processes in the same `remote-server` container and generated server Pod on a GPU worker node | Deployment generated by `controller/mutate.py`; container includes `runtime/remoter/`        |
 
 ```mermaid
 sequenceDiagram
@@ -236,16 +236,16 @@ pod and not as part of this Helm chart. It receives pod assignments, asks the
 container runtime to start containers, mounts the ConfigMap, runs probes, and reports
 pod status. The kubelet does not inspect or forward inference calls.
 
-| Component | Runs where | Responsibility in this design |
-|-----------|------------|-------------------------------|
-| `kube-apiserver` | Managed control plane | Accept workloads, invoke admission, and expose pod state |
-| Scheduler and controllers | Managed control plane | Select nodes and maintain Deployments and Pods |
-| `kubelet` | Every CPU and GPU worker node | Start and monitor the pods assigned to its node |
-| Container runtime | Every worker node | Run the mutation controller, client, and server containers |
-| CNI plugin | Every worker node | Provide routable pod IPs for client-to-server TCP traffic |
-| NVIDIA device plugin | GPU worker nodes | Advertise `nvidia.com/gpu` resources to Kubernetes |
+| Component                                  | Runs where                         | Responsibility in this design                                                |
+|--------------------------------------------|------------------------------------|------------------------------------------------------------------------------|
+| `kube-apiserver`                           | Managed control plane              | Accept workloads, invoke admission, and expose pod state                     |
+| Scheduler and controllers                  | Managed control plane              | Select nodes and maintain Deployments and Pods                               |
+| `kubelet`                                  | Every CPU and GPU worker node      | Start and monitor the pods assigned to its node                              |
+| Container runtime                          | Every worker node                  | Run the mutation controller, client, and server containers                   |
+| CNI plugin                                 | Every worker node                  | Provide routable pod IPs for client-to-server TCP traffic                    |
+| NVIDIA device plugin                       | GPU worker nodes                   | Advertise `nvidia.com/gpu` resources to Kubernetes                           |
 | `kube-proxy` or CNI service implementation | Worker nodes, depending on cluster | Route the webhook Service; inference uses discovered server pod IPs directly |
-| Mutation controller | A regular cluster pod | Mutate opted-in workloads and reconcile server Deployments |
+| Mutation controller                        | A regular cluster pod              | Mutate opted-in workloads and reconcile server Deployments                   |
 
 > [!IMPORTANT]
 > The disabled `node-agent-daemonset.yaml` is not a kubelet replacement. This fork
@@ -258,6 +258,7 @@ pod status. The kubelet does not inspect or forward inference calls.
 | `controller/`                   | Mutation controller (Python)                   |
 | `helm/gpu-offload/`             | Helm chart for control plane                   |
 | `runtime/`                      | Xavier remoting SDK with MessagePack transport |
+| `registry/`                     | Host-local registry and pull-through caches    |
 | `specifications/`               | Remote.yaml schema and opt-in contract         |
 | `examples/so101-real-hardware/` | SO-101 end-to-end example                      |
 | `examples/pi05/`                | Pi0.5 UR10e example, node-local checkpoint     |

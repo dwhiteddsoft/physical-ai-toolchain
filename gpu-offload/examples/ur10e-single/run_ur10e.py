@@ -1,4 +1,4 @@
-# cspell:ignore autohome gethostname teleop
+# cspell:ignore autohome draccus gethostname pyautogui teleop teleoperator
 """Control-loop entrypoint for the offloaded ur10e-single Pi0.5 deployment.
 
 Two modes:
@@ -6,6 +6,11 @@ Two modes:
 ``self-check``
     Load the checkpoint on the GPU stage and run synthetic observations through
     it. Proves the offload path end to end without a UR10e attached.
+
+``headless``
+    Drive the UR10e from a terminal with no display, no dataset, and no
+    teleoperator. This is the mode a container runs: it homes the arm, then
+    streams observations to the GPU stage and applies the returned actions.
 
 ``record``
     Run the stock ``lerobot-record`` loop from the ur10e-single deployment with
@@ -19,6 +24,10 @@ The record mode redirects lerobot at three seams instead of forking it:
 :class:`~ur10e_offload.PolicyRunner`. The stand-ins exist because the record loop
 reads ``policy.config.device`` and ``policy.config.use_amp`` on every cycle; a
 remote proxy would turn each read into a round trip.
+
+The headless mode skips those seams entirely and runs the same sequence the
+record loop performs per step -- observation, dataset frame, inference, action --
+which keeps the desktop dependencies of the ur10e-single plugin out of the path.
 """
 
 from __future__ import annotations
@@ -27,9 +36,11 @@ import argparse
 import json
 import logging
 import os
+import signal
 import socket
 import sys
 import time
+import types
 from copy import copy
 from pathlib import Path
 from typing import Any
@@ -45,6 +56,8 @@ DEFAULT_RENAME_MAP = {
     "observation.images.scene": "observation.images.base_0_rgb",
     "observation.images.wrist": "observation.images.left_wrist_0_rgb",
 }
+
+_MODES = ("self-check", "headless", "record")
 
 
 def emit(event: str, **fields: Any) -> None:
@@ -234,6 +247,170 @@ def _run_self_check(session: OffloadSession, args: argparse.Namespace) -> int:
         time.sleep(max(0.0, period - (time.perf_counter() - started)))
 
 
+class _NullDashboard:
+    """Stands in for the Gradio dashboard the ur10e-single plugin builds.
+
+    The plugin renders camera feeds to a browser and gates episode start on a
+    button click. Neither is reachable from a container, and the plugin's
+    fallback for an unavailable dashboard is a blocking :func:`input` call, so
+    the dashboard is replaced rather than disabled.
+    """
+
+    available = False
+    url = None
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    def render(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    def start_waiting(self) -> None:
+        return None
+
+    def stop_waiting(self) -> None:
+        return None
+
+    def is_clicked(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        return None
+
+
+def _install_headless_stubs() -> None:
+    """Remove the display dependencies from the ur10e-single plugin import path.
+
+    ``lerobot_robot_ur10e/__init__.py`` imports its teleoperator, which imports
+    ``pyautogui`` at module scope; ``pyautogui`` resolves ``DISPLAY`` while
+    importing and raises ``KeyError`` when there is no X server. The headless
+    loop is policy-driven and never calls a teleoperator, so a stub is enough.
+    """
+    if "pyautogui" not in sys.modules:
+        stub = types.ModuleType("pyautogui")
+        stub.press = lambda *_args, **_kwargs: None
+        stub.hotkey = lambda *_args, **_kwargs: None
+        sys.modules["pyautogui"] = stub
+
+
+def _require_realsense() -> None:
+    """Fail early when the RealSense backend cannot load.
+
+    lerobot imports ``pyrealsense2`` lazily and swallows the failure, so a missing
+    shared library surfaces much later as ``NameError: name 'rs' is not defined``
+    inside camera connect.
+    """
+    try:
+        import pyrealsense2  # noqa: F401
+    except ImportError as error:
+        raise RuntimeError(f"The RealSense backend failed to load: {error}") from error
+
+
+def _build_robot(robot_config_path: str) -> Any:
+    """Construct the UR10e driver from the ur10e-single robot config file."""
+    _install_headless_stubs()
+
+    import draccus
+
+    # Camera config subclasses register themselves on import, and the ur10e-single
+    # config names them by their registered type rather than their class.
+    from lerobot.cameras import opencv, realsense  # noqa: F401
+    from lerobot_robot_ur10e import UR10E, UR10EConfig
+    from lerobot_robot_ur10e import ur10e as ur10e_module
+
+    # The plugin constructs the dashboard in __init__ and calls it from
+    # send_action, so both the class and the two call sites are neutralized.
+    ur10e_module.DemoDashboard = _NullDashboard
+    UR10E._wait_for_dashboard_button = lambda self: None
+    UR10E._render_dashboard = lambda self: None
+
+    payload = json.loads(Path(robot_config_path).read_text(encoding="utf-8"))
+    robot_section = payload.get("robot", payload)
+    robot_section.pop("type", None)
+    config = draccus.decode(UR10EConfig, robot_section)
+    if any(type(camera).__name__ == "RealSenseCameraConfig" for camera in config.cameras.values()):
+        _require_realsense()
+    return UR10E(config)
+
+
+def _home(robot: Any, speed: float) -> None:
+    """Move the arm straight to the home pose and enable servoJ streaming.
+
+    The driver's ``reset`` action reaches home by way of the submissive pose at
+    full speed and gates the transition on the dashboard button. Driving the
+    same steps directly removes the detour and keeps the one unplanned move
+    slow. ``active`` is what gates servoJ, and only this sequence sets it.
+    """
+    robot.reset()
+    robot.home(gripper_position=0.0, speed=speed)
+    robot.active = True
+
+
+def _run_headless(session: OffloadSession, args: argparse.Namespace) -> int:
+    """Drive the arm from the offloaded policy with no display or dataset."""
+    from lerobot.datasets.utils import build_dataset_frame, hw_to_dataset_features
+    from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
+
+    robot = _build_robot(args.robot_config)
+    observation_features = hw_to_dataset_features(robot.observation_features, "observation")
+    action_features = hw_to_dataset_features(robot.action_features, "action")
+
+    logger.info("Connecting to the UR10e and cameras")
+    robot.connect()
+    emit("robot_connected", robot_type=robot.robot_type, cameras=sorted(robot.cameras))
+
+    stopping = {"requested": False}
+
+    def request_stop(*_args: Any) -> None:
+        stopping["requested"] = True
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+
+    try:
+        session.reset()
+        logger.warning("Moving the arm to the home pose; keep the workspace clear")
+        _home(robot, args.home_speed)
+        emit("homed")
+
+        period = 1.0 / max(args.fps, 1)
+        step = 0
+        while not stopping["requested"] and (args.max_steps <= 0 or step < args.max_steps):
+            started = time.perf_counter()
+            frame = build_dataset_frame(observation_features, robot.get_observation(), prefix="observation")
+            # Convert on the CPU: the codec has no NumPy adapter, and this
+            # container holds no GPU to convert onto.
+            prepared = prepare_observation_for_inference(
+                frame, torch.device("cpu"), args.task, robot.robot_type
+            )
+            action_values = session.get_action(prepared)
+            action = make_robot_action(action_values, action_features)
+            robot.send_action(action)
+
+            cycle_ms = round((time.perf_counter() - started) * 1000, 1)
+            if step % args.log_every == 0:
+                emit(
+                    "action",
+                    step=step,
+                    client_host=socket.gethostname(),
+                    executed_by=session.info["hostname"],
+                    action={name: round(value, 4) for name, value in action.items()},
+                    cycle_ms=cycle_ms,
+                )
+            step += 1
+            time.sleep(max(0.0, period - (time.perf_counter() - started)))
+
+        emit("headless_finished", steps=step)
+    finally:
+        logger.info("Returning the arm to the home pose and disconnecting")
+        robot.active = False
+        _home(robot, args.home_speed)
+        emit("homed_on_exit")
+        robot.disconnect()
+
+    return 0
+
+
 def _run_record(session: OffloadSession, args: argparse.Namespace, rename_map: dict[str, str]) -> int:
     import lerobot.scripts.lerobot_record as lerobot_record
 
@@ -265,9 +442,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("self-check", "record"),
+        choices=_MODES,
         default=os.environ.get("UR10E_MODE", "self-check"),
-        help="self-check drives synthetic observations; record drives the UR10e",
+        help="self-check drives synthetic observations; headless and record drive the UR10e",
     )
     parser.add_argument("--checkpoint-path", default=os.environ.get("UR10E_CHECKPOINT_PATH", "/models/pi05-ur10e"))
     parser.add_argument("--device", default=os.environ.get("UR10E_DEVICE", "cuda"))
@@ -286,12 +463,30 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--n-action-steps", type=int, default=int(os.environ.get("UR10E_N_ACTION_STEPS", "50")))
     parser.add_argument("--state-dim", type=int, default=int(os.environ.get("UR10E_STATE_DIM", "7")))
     parser.add_argument("--steps", type=int, default=int(os.environ.get("UR10E_SELF_CHECK_STEPS", "3")))
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=int(os.environ.get("UR10E_MAX_STEPS", "0")),
+        help="headless mode: stop after this many control cycles, or 0 to run until interrupted",
+    )
+    parser.add_argument(
+        "--home-speed",
+        type=float,
+        default=float(os.environ.get("UR10E_HOME_SPEED", "0.2")),
+        help="headless mode: joint speed for the moves to the home pose",
+    )
     parser.add_argument("--log-every", type=int, default=int(os.environ.get("UR10E_LOG_EVERY", "50")))
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+
+    # argparse only validates choices for values passed on the command line, so a
+    # mode supplied through UR10E_MODE reaches here unchecked.
+    if args.mode not in _MODES:
+        logger.error("Unknown mode %r; expected one of %s", args.mode, ", ".join(_MODES))
+        return 1
 
     rename_map = DEFAULT_RENAME_MAP
     raw_rename_map = os.environ.get("UR10E_RENAME_MAP", "").strip()
@@ -311,6 +506,8 @@ def main() -> int:
 
     if args.mode == "self-check":
         return _run_self_check(session, args)
+    if args.mode == "headless":
+        return _run_headless(session, args)
     return _run_record(session, args, rename_map)
 
 

@@ -21,7 +21,10 @@ tensors before calling :meth:`get_action`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import socket
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
@@ -33,6 +36,39 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_infer_count = 0
+
+
+def _debug_inference(observation: dict[str, Any], action: torch.Tensor, policy: Any) -> None:
+    """Emit a per-call fingerprint of the observation as seen by the GPU stage.
+
+    Enabled by ``UR10E_DEBUG_INFERENCE``. Distinguishes a stalled client loop
+    from a stalled policy: the counter proves server-side re-execution, the
+    image digests prove the observation varies across the wire, and the queue
+    length shows whether ``select_action`` is refilling its chunk every call.
+    """
+    fingerprint = {}
+    for name, value in sorted(observation.items()):
+        if isinstance(value, torch.Tensor) and value.ndim >= 3:
+            digest = hashlib.sha1(value.detach().cpu().numpy().tobytes()).hexdigest()
+            fingerprint[name] = digest[:10]
+    state = observation.get("observation.state")
+    queues = getattr(policy, "_queues", None)
+    print(
+        json.dumps(
+            {
+                "event": "server_infer",
+                "n": _infer_count,
+                "obj_id": id(policy),
+                "images": fingerprint,
+                "state": [round(float(v), 4) for v in state.flatten().tolist()] if state is not None else None,
+                "action": [round(float(v), 4) for v in action.flatten().tolist()],
+                "queue_len": {k: len(v) for k, v in queues.items()} if isinstance(queues, dict) else None,
+            }
+        ),
+        flush=True,
+    )
+
 
 class PolicyRunner:
     """Load a Pi0.5 checkpoint and run single-step inference on the GPU stage.
@@ -41,9 +77,10 @@ class PolicyRunner:
     is restricted to strings.
     """
 
-    def __init__(self, checkpoint_path: str, device: str = "cuda") -> None:
+    def __init__(self, checkpoint_path: str, device: str = "cuda", compile_model: bool = False) -> None:
         self.checkpoint_path = checkpoint_path
         self.device = device
+        self.compile_model = compile_model
 
     def load(self, rename_map: dict[str, str] | None = None) -> tuple[Any, Any, Any]:
         """Load the policy and its saved processor pipelines.
@@ -56,13 +93,23 @@ class PolicyRunner:
         already carry the training quantiles, which keeps NumPy statistics off the
         wire.
 
+        ``compile_model`` is resolved before construction because the policy binds
+        ``torch.compile`` in ``__init__``. The checkpoint enables it, which costs
+        roughly 200 s of autotuning on the first inference; the control loop wants
+        a predictable first cycle instead.
+
         Returns ``(policy, preprocessor, postprocessor)`` as remote proxies.
         """
+        from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 
         logger.info("Loading pi05 checkpoint from %s onto %s", self.checkpoint_path, self.device)
-        policy = PI05Policy.from_pretrained(self.checkpoint_path)
+        # PreTrainedConfig resolves the concrete config class from the checkpoint's
+        # "type" discriminator; the subclass alone cannot parse that field.
+        config = PreTrainedConfig.from_pretrained(self.checkpoint_path)
+        config.compile_model = self.compile_model
+        policy = PI05Policy.from_pretrained(self.checkpoint_path, config=config)
         policy.to(self.device)
         policy.eval()
 
@@ -117,6 +164,8 @@ class PolicyRunner:
         step targeting the CPU, so the returned tensor is safe to serialize back.
         """
         amp = use_amp and torch.cuda.is_available()
+        global _infer_count
+        _infer_count += 1
         with (
             torch.inference_mode(),
             torch.autocast(device_type="cuda") if amp else nullcontext(),
@@ -124,4 +173,7 @@ class PolicyRunner:
             processed = preprocessor(observation)
             action = policy.select_action(processed)
             action = postprocessor(action)
-        return action.detach().cpu()
+        action = action.detach().cpu()
+        if os.environ.get("UR10E_DEBUG_INFERENCE"):
+            _debug_inference(observation, action, policy)
+        return action

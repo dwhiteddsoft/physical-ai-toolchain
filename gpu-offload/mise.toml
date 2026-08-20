@@ -62,8 +62,16 @@ description = "Check local tools and render the GPU offload Helm chart"
 run = "scripts/preflight-check.sh"
 
 [tasks."b-host-20-registry"]
-description = "Start the host-local image registry and register it as a k3s mirror"
-run = "scripts/registry-start.sh"
+description = "Start the host-local image registry and pull-through caches"
+run = "registry/registry-up.sh"
+
+[tasks."b-host-21-registry-status"]
+description = "Report registry state, cache sizes, and runtime registration"
+run = "registry/registry-status.sh"
+
+[tasks."b-host-29-registry-down"]
+description = "Stop the host-local image registry and its caches"
+run = "registry/registry-down.sh"
 
 # ==============================================================================
 # Cluster lifecycle
@@ -172,6 +180,10 @@ run = "examples/pi05/scripts/teardown.sh"
 # ==============================================================================
 # ur10e-single example
 # ==============================================================================
+
+[tasks."g-ur10e-30-run-headless-host"]
+description = "Drive the UR10e from the host with the Pi0.5 policy, no display or dataset"
+run = "examples/ur10e-single/scripts/run-headless-host.sh"
 
 [tasks."g-ur10e-40-build-image"]
 description = "Build the ur10e-single workload image with the remoter SDK layered in"

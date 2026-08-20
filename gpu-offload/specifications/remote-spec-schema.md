@@ -25,21 +25,21 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 `remote.yaml` declares three optional top-level keys. At least one of `serverstages`,
 `remoteclasses`, or `remotefuncs` must be present.
 
-| Key | Type | Required | Purpose |
-|---|---|---|---|
-| `serverstages` | list of objects | Yes | Define named GPU worker pods |
-| `remoteclasses` | list of mappings | No | Classes whose methods execute in stages |
-| `remotefuncs` | list of mappings | No | Functions that execute in stages |
+| Key             | Type             | Required | Purpose                                 |
+|-----------------|------------------|----------|-----------------------------------------|
+| `serverstages`  | list of objects  | Yes      | Define named GPU worker pods            |
+| `remoteclasses` | list of mappings | No       | Classes whose methods execute in stages |
+| `remotefuncs`   | list of mappings | No       | Functions that execute in stages        |
 
 ## serverstages
 
 A **stage** is a GPU worker pod hosting offloaded classes and functions.
 
-| Field | Type | Required | Meaning |
-|---|---|---|---|
-| `name` | string | Yes | Stage identifier (empty string is default) |
-| `perclient` | boolean | Yes | `false`: shared pod; `true`: per-client pod |
-| `resources` | map | Yes | Kubernetes resource requests/limits |
+| Field       | Type    | Required | Meaning                                     |
+|-------------|---------|----------|---------------------------------------------|
+| `name`      | string  | Yes      | Stage identifier (empty string is default)  |
+| `perclient` | boolean | Yes      | `false`: shared pod; `true`: per-client pod |
+| `resources` | map     | Yes      | Kubernetes resource requests/limits         |
 
 **Example:**
 
@@ -61,10 +61,10 @@ Each entry is a single-key map: the key is a fully-qualified class path, value
 selects the target stage. Method calls on instances execute transparently in the
 stage pod.
 
-| Field | Type | Required | Meaning |
-|---|---|---|---|
-| _(map key)_ | string | Yes | Class path in `module.path/ClassName` form |
-| `remoteloc` | string | Yes | Target `serverstages` entry `name` |
+| Field       | Type   | Required | Meaning                                    |
+|-------------|--------|----------|--------------------------------------------|
+| _(map key)_ | string | Yes      | Class path in `module.path/ClassName` form |
+| `remoteloc` | string | Yes      | Target `serverstages` entry `name`         |
 
 **Example:**
 
@@ -80,14 +80,20 @@ Each entry is a single-key map: the key is a fully-qualified function path, valu
 selects the target stage and declares instancing semantics. Calls execute
 transparently in the stage pod.
 
-| Field | Type | Required | Meaning |
-|---|---|---|---|
-| _(map key)_ | string | Yes | Path in `module.path//function` or `module.path/Class/method` form |
-| `singleinstance` | boolean | No | `true`: object instantiated once and shared; `false`: per-call |
-| `remoteloc` | string | Yes | Target `serverstages` entry `name` |
+| Field            | Type    | Required | Meaning                                                            |
+|------------------|---------|----------|--------------------------------------------------------------------|
+| _(map key)_      | string  | Yes      | Path in `module.path//function` or `module.path/Class/method` form |
+| `singleinstance` | boolean | No       | `true`: called once, then the first result is memoized and returned to every later caller; `false`: per-call |
+| `remoteloc`      | string  | Yes      | Target `serverstages` entry `name`                                 |
 
 Set `singleinstance: true` on functions that load heavy resources so the model
 loads once in the stage pod and every call reuses it.
+
+> [!WARNING]
+> `singleinstance` memoizes the return value; the function body runs exactly once.
+> Setting it on a per-call method such as `get_action` makes the stage return the
+> first action forever, which reads as a policy that emits a constant output rather
+> than as an error. Restrict it to calls whose result is the loaded resource.
 
 **Example:**
 
@@ -129,16 +135,16 @@ The following fields in the ConfigMap annotation are deprecated in favor of
 per-stage configuration. They are currently used by the controller but should
 not be relied upon in new code.
 
-| Field | Type | Implemented | Purpose |
-|---|---|---|---|
-| `serverimage` | string | Implemented | Image for server deployment |
-| `serverreplicas` | integer | Implemented | Number of deployment replicas |
-| `nodeSelector` | map | Implemented | Node selection for server pods |
-| `securityContext` | object | Implemented | Validated security context for containers |
-| `env` | list | Implemented | Environment variables for containers |
-| `noserverdeployment` | boolean | Implemented | Skip server deployment creation |
-| `remoteablecm` | string | Implemented | ConfigMap name (required) |
-| `remoteableconts` | list | Implemented | Container names to mutate (optional) |
+| Field                | Type    | Implemented | Purpose                                   |
+|----------------------|---------|-------------|-------------------------------------------|
+| `serverimage`        | string  | Implemented | Image for server deployment               |
+| `serverreplicas`     | integer | Implemented | Number of deployment replicas             |
+| `nodeSelector`       | map     | Implemented | Node selection for server pods            |
+| `securityContext`    | object  | Implemented | Validated security context for containers |
+| `env`                | list    | Implemented | Environment variables for containers      |
+| `noserverdeployment` | boolean | Implemented | Skip server deployment creation           |
+| `remoteablecm`       | string  | Implemented | ConfigMap name (required)                 |
+| `remoteableconts`    | list    | Implemented | Container names to mutate (optional)      |
 
 Future work will move configuration into the stage definitions above and deprecate
 these top-level fields.

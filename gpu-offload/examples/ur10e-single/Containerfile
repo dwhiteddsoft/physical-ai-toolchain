@@ -41,10 +41,11 @@ ENV UV_LINK_MODE=copy
 ENV HF_HUB_OFFLINE=1
 
 # opencv links against libGL and glib; lsof backs the remoter port checks; git is
-# needed because the lock resolves lerobot from a git revision.
+# needed because the lock resolves lerobot from a git revision. librealsense binds
+# the RealSense cameras over raw USB, so it needs libusb and libudev at run time.
 RUN apt-get update && \
 	apt-get install --yes --no-install-recommends \
-	git libgl1 libglib2.0-0 lsof && \
+	git libgl1 libglib2.0-0 libudev1 libusb-1.0-0 lsof && \
 	rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -55,6 +56,10 @@ COPY examples/ur10e-single/.ur10e-src/pyproject.toml examples/ur10e-single/.ur10
 COPY examples/ur10e-single/.ur10e-src/lerobot_robot_ur10e /workspace/lerobot_robot_ur10e
 
 RUN uv sync --frozen --no-install-project
+
+# --no-install-project also skips workspace members, and the UR10e driver is one.
+# The lock already resolved its dependencies, so only the package itself is added.
+RUN uv pip install --python /workspace/.venv/bin/python --no-deps ./lerobot_robot_ur10e
 
 # Robot and camera configuration travels with the image.
 COPY examples/ur10e-single/.ur10e-src/script /workspace/script

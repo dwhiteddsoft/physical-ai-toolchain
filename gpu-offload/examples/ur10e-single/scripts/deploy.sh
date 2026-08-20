@@ -33,7 +33,7 @@ test -d "$cache_path" || {
 }
 
 curl --silent --fail "http://$registry_host/v2/" > /dev/null || {
-  echo "No registry on http://$registry_host/v2/; run scripts/registry-start.sh first" >&2
+  echo "No registry on http://$registry_host/v2/; run registry/registry-up.sh first" >&2
   exit 1
 }
 
@@ -43,7 +43,11 @@ helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" upgrade --install "$release" exa
   --set "image.registry=$registry_host" \
   --set "model.hostPath=$model_path" \
   --set "huggingFaceCache.hostPath=$cache_path" \
-  --set "policy.mode=${UR10E_MODE:-self-check}"
+  --set "policy.mode=${UR10E_MODE:-self-check}" \
+  --set "robot.usb.enabled=${UR10E_USB_ENABLED:-false}" \
+  --set "robot.maxSteps=${UR10E_MAX_STEPS:-0}" \
+  --set "robot.logEvery=${UR10E_LOG_EVERY:-50}" \
+  --set "robot.debugInference=${UR10E_DEBUG_INFERENCE:-}"
 
 server="$release-control-remote-server-gpu"
 kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait --for=create \
@@ -57,6 +61,14 @@ kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait --for=create \
 kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" scale "deployment/$release-control" \
   --namespace "$namespace" \
   --replicas=0
+# scale returns as soon as the replica count is recorded. Wait for the pods to be
+# gone: a terminating client still calls load(), and that call reaches the incoming
+# server and claims its single-instance slot for a connection that is about to
+# close, which deadlocks the next client on a result that is never delivered.
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait --for=delete pod \
+  --namespace "$namespace" \
+  --selector "app=$release-control" \
+  --timeout=180s
 # An exclusive GPU cannot be surged: the replacement pod stays Pending on
 # "Insufficient nvidia.com/gpu" until the outgoing pod releases the device.
 kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" patch "deployment/$server" \

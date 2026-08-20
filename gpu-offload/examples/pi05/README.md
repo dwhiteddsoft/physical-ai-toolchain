@@ -37,7 +37,7 @@ floats, camera frames as JPEG bytes, and the action as floats.
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
 | GPU node            | 16 GB VRAM or more, with the NVIDIA device plugin advertising `nvidia.com/gpu`                                                                        |
 | Cluster runtime     | `k3s` on the GPU host: the checkpoint is exposed through a hostPath `PersistentVolume`, which a `kind` node container cannot see without extra mounts |
-| `gpu-offload` chart | Installed cluster-wide (`mise run d-offload-43-install-controller`)                                                                                     |
+| `gpu-offload` chart | Installed cluster-wide (`mise run d-offload-43-install-controller`)                                                                                   |
 | Trained checkpoint  | A pi05 checkpoint directory on the node holding `config.json`, `model.safetensors`, and the saved processor pipelines                                 |
 | HuggingFace cache   | The gated `google/paligemma-3b-pt-224` tokenizer cached on the node; the pods run with `HF_HUB_OFFLINE=1`                                             |
 | UR10e               | Only for real motion; dry-run mode needs no robot                                                                                                     |

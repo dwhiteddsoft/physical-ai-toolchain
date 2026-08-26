@@ -1,7 +1,7 @@
 ---
 title: LeRobot SO-101 integration
 description: Pinned LeRobot workflows, multi-architecture images, and optional Xavier offloading
-ms.date: 2026-08-24
+ms.date: 2026-08-26
 ---
 
 # LeRobot SO-101 integration
@@ -170,3 +170,15 @@ Validate policy loading and one synthetic action without opening robot devices:
   --set job.suspend=false \
   --set validation.enabled=true
 ```
+
+Enable aggregated control-loop timing for a rollout:
+
+```bash
+./scripts/install_k8s_rollout.sh --offload \
+  --set rollout.timing.enabled=true \
+  --set rollout.timing.reportEvery=100
+```
+
+Timing summaries report mean, p50, p95, and maximum latency for camera access,
+serial reads and writes, observation preparation, remote policy calls, action
+dispatch, and related control-loop stages. Timing is disabled by default.

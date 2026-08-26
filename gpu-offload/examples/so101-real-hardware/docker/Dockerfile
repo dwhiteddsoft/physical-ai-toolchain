@@ -73,6 +73,7 @@ USER root
 
 COPY --from=runtime / /opt/xavier/offload/runtime/
 COPY docker/sitecustomize.py /opt/xavier/sitecustomize.py
+COPY docker/rollout_timing.py /opt/xavier/lerobot/diagnostics/rollout_timing.py
 COPY --chown=lerobot:lerobot scripts/ /opt/xavier/lerobot/scripts/
 COPY docker/entrypoint.sh /usr/local/bin/lerobot-entrypoint
 

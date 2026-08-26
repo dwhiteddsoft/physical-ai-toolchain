@@ -27,6 +27,9 @@ rollout:
   fps: "30"
   inference: sync
   extraArgs: []
+  timing:
+    enabled: false
+    reportEvery: 100
 
 validation:
   enabled: false
@@ -58,6 +61,8 @@ offload:
   configMapName: ""
   serviceAccountName: ""
   port: "30001"
+  logLevel: INFO
+  printLogLevel: INFO
   stageName: gpu
   server:
     replicas: 1

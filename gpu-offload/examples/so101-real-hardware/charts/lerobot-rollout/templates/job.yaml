@@ -16,6 +16,10 @@ metadata:
       env:
         - name: REMOTERPORT
           value: {{ .Values.offload.port | quote }}
+        - name: XAVIER_LOGLEVEL
+          value: {{ .Values.offload.logLevel | quote }}
+        - name: XAVIER_PRINTLOGLEVEL
+          value: {{ .Values.offload.printLogLevel | quote }}
   {{- end }}
 spec:
   suspend: {{ .Values.job.suspend }}
@@ -99,6 +103,10 @@ spec:
           env:
             - name: REMOTERPORT
               value: {{ .Values.offload.port | quote }}
+            - name: XAVIER_LOGLEVEL
+              value: {{ .Values.offload.logLevel | quote }}
+            - name: XAVIER_PRINTLOGLEVEL
+              value: {{ .Values.offload.printLogLevel | quote }}
             - name: POD_IP
               valueFrom:
                 fieldRef:

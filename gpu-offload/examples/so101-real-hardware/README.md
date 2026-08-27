@@ -4,11 +4,9 @@ description: Pinned LeRobot workflows, multi-architecture images, and optional X
 ms.date: 2026-08-26
 ---
 
-# LeRobot SO-101 integration
-
 This example packages a pinned
 [LeRobot](https://github.com/huggingface/lerobot) checkout for SO-101 episode
-collection, finetuning, evaluation, and rollout. The image builds for both
+collection, fine-tuning, evaluation, and rollout. The image builds for both
 `linux/amd64` and `linux/arm64` and includes the Xavier remoting runtime.
 
 ## 📋 Initialize
@@ -20,7 +18,7 @@ git submodule update --init --recursive \
   gpu-offload/examples/so101-real-hardware/upstream
 ```
 
-The exact commit is stored by the submodule gitlink. `.lerobot-version` records
+The exact commit is stored by the Git submodule reference. `.lerobot-version` records
 the requested upstream tag, branch, or commit used by image tags and scripts.
 
 ## 📦 Build the image
@@ -148,20 +146,28 @@ Enable transparent Xavier offloading during installation and startup:
 ./scripts/start_k8s_rollout.sh --offload
 ```
 
-On the Thor robot host, the verified policy, camera, serial-device, local image,
-and offload settings are captured in `charts/lerobot-rollout/values.thor.yaml`:
+Use `charts/lerobot-rollout/values.example.yaml` as a starting point. Adapt its image, policy,
+calibration, serial-device, and camera values to the target host. The checked-in
+file demonstrates a two-camera SO-101 configuration; it is not tied to a host
+named Thor or to the devices and paths available on another system.
 
 ```bash
 ./scripts/install_k8s_rollout.sh \
-  --values charts/lerobot-rollout/values.thor.yaml
+  --values charts/lerobot-rollout/values.example.yaml
 
 ./scripts/start_k8s_rollout.sh \
-  --values charts/lerobot-rollout/values.thor.yaml
+  --values charts/lerobot-rollout/values.example.yaml
 ```
 
 The chart adds the `xavier: "true"` opt-in label and an ACT `remote.yaml`
 ConfigMap. Policy loading and `ACTPolicy.select_action` execute in the generated
 server deployment. The application container retains robot and camera I/O.
+
+With `offload.rawObservation.enabled=false`, the example runs LeRobot's pinned
+upstream synchronous inference code without modifying it. The GPU offload runtime
+transparently intercepts the configured policy load and
+`ACTPolicy.select_action` calls, demonstrating that an existing application can
+use GPU offload without source changes.
 
 Validate policy loading and one synthetic action without opening robot devices:
 
@@ -191,7 +197,12 @@ Move image conversion and the policy processor pipeline to the offload server:
 ```
 
 This mode sends compact `uint8` camera tensors instead of normalized `float32`
-tensors. It applies only to synchronous inference and is disabled by default.
+tensors. The example-layer implementation in
+`docker/raw_observation_inference.py` moves image preparation and the policy
+processor pipeline to the server without changing the pinned LeRobot submodule.
+It demonstrates an optional optimization that requires only a small integration
+wrapper when transparent method offload does not provide enough throughput.
+This mode applies only to synchronous inference and is disabled by default.
 
 ## 📊 Results
 

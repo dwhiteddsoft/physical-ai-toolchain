@@ -1,6 +1,6 @@
 image:
   repository: lerobot-so101
-  tag: physical-offload
+  tag: "0.6.1"
   pullPolicy: Never
 
 runtimeClass:
@@ -18,7 +18,7 @@ rollout:
   robotCameras: >-
     {wrist: {type: opencv, index_or_path: /dev/video0, width: 640, height: 480, fps: 30, fourcc: MJPG},
     top: {type: opencv, index_or_path: /dev/video2, width: 640, height: 480, fps: 30, fourcc: MJPG}}
-  policyPath: /home/xavier/act_so101_test
+  policyPath: /policies/act_so101
   calibrationMountPath: /home/lerobot/.cache/huggingface/lerobot/calibration
   task: Pick up an object and place it in the target area
   duration: "60"
@@ -29,8 +29,8 @@ validation:
   enabled: false
 
 hostPaths:
-  policy: /home/xavier/act_so101_test
-  calibration: /home/xavier/.cache/huggingface/lerobot/calibration
+  policy: /path/to/act_so101
+  calibration: /path/to/lerobot/calibration
 
 devices:
   - name: robot

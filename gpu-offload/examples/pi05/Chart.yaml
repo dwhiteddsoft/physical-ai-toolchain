@@ -1,0 +1,6 @@
+apiVersion: v2
+name: gpu-offload-pi05
+description: Pi0.5 UR10e control loop with GPU-offloaded policy inference
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

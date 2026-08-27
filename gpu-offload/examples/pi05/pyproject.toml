@@ -1,0 +1,53 @@
+# Dependency set for the Pi0.5 (pi05) offload example.
+#
+# Translated from the Physical-AI-Operator `requirements-pi05.txt` flow. pi05 needs
+# lerobot's transformers fork (patched SigLIP); stock PyPI transformers lacks
+# `transformers.models.siglip.check` and pi05 fails with "An incorrect transformer
+# version is used". The fork conflicts with stock transformers, so this project is
+# isolated from every other Python subproject in the repository.
+#
+# torch stays below 2.8 for lerobot 0.4.3 and resolves from the cu128 index so the
+# wheels run on Blackwell (sm_120) GPUs.
+#
+#   uv venv --seed && uv sync
+#
+# cspell:ignore openpi
+[project]
+name = "gpu-offload-pi05"
+version = "0.1.0"
+description = "Pi0.5 UR10e control loop with GPU-offloaded policy inference"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "lerobot==0.4.3",
+  "numpy",
+  "opencv-python",
+  "pandas",
+  "pyyaml",
+  "scipy>=1.10.1,<1.15",
+  "sentencepiece",
+  "torch==2.7.1",
+  "torchvision==0.22.1",
+  "transformers",
+  "xavier-remoter-runtime",
+]
+
+[tool.uv]
+package = false
+# The GPU stage runs on linux/x86_64 nodes; constrain the universal lock to that
+# platform so the cu128 wheels resolve without macOS or aarch64 branches.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+transformers = { git = "https://github.com/huggingface/transformers.git", branch = "fix/lerobot_openpi" }
+xavier-remoter-runtime = { path = "../../runtime" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

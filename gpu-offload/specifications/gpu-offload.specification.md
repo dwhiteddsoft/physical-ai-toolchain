@@ -13,11 +13,11 @@ consumes and the mutating controller's observable behavior.
 A workload opts in through three required signals. Omitting any one disables
 offloading for that workload.
 
-| Signal | Location | Value | Purpose |
-|---|---|---|---|
-| Label `xavier` | Workload metadata | `"true"` | Select for mutation |
-| Annotation `xavierconfig` | Workload metadata | ConfigMap name | Reference remote.yaml |
-| Env `REMOTERPORT` | Main container | Port (e.g. `30001`) | Server endpoint |
+| Signal                    | Location          | Value               | Purpose               |
+|---------------------------|-------------------|---------------------|-----------------------|
+| Label `xavier`            | Workload metadata | `"true"`            | Select for mutation   |
+| Annotation `xavierconfig` | Workload metadata | ConfigMap name      | Reference remote.yaml |
+| Env `REMOTERPORT`         | Main container    | Port (e.g. `30001`) | Server endpoint       |
 
 The annotation value points to a ConfigMap containing the `remote.yaml` offload
 specification. See [remote-spec-schema.md](./remote-spec-schema.md) for schema.
@@ -49,17 +49,17 @@ are mutated; others are left unchanged.
 
 The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 
-| Field | Type | Implemented | Notes |
-|---|---|---|---|
-| `serverimage` | string | Implemented | Server container image; defaults to application image |
-| `serverreplicas` | integer | Implemented | Server Deployment replica count |
-| `nodeSelector` | map[string]string | Implemented | Server pod node selection |
-| `securityContext` | object | Implemented | Validated server container security context |
-| `env` | list of name/value | Implemented | Environment merged into server container |
-| `noserverdeployment` | boolean | Implemented | Skips server Deployment creation |
-| `serverstages` | list of stage objects | Implemented | Shared and per-client server stages |
-| `remoteablecm` | string | Implemented | ConfigMap name (required by controller) |
-| `remoteableconts` | list of strings | Implemented | Container names to mutate (optional filter) |
+| Field                | Type                  | Implemented | Notes                                                 |
+|----------------------|-----------------------|-------------|-------------------------------------------------------|
+| `serverimage`        | string                | Implemented | Server container image; defaults to application image |
+| `serverreplicas`     | integer               | Implemented | Server Deployment replica count                       |
+| `nodeSelector`       | map[string]string     | Implemented | Server pod node selection                             |
+| `securityContext`    | object                | Implemented | Validated server container security context           |
+| `env`                | list of name/value    | Implemented | Environment merged into server container              |
+| `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
+| `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
+| `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |
+| `remoteableconts`    | list of strings       | Implemented | Container names to mutate (optional filter)           |
 
 ## Behavior Guarantees
 

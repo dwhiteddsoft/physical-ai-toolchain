@@ -59,14 +59,14 @@ Dataset injection provides named, reusable dataset versions across runs.
 
 ## ⚖️ Platform Selection
 
-| Aspect              | Azure ML                              | OSMO                                 |
-|---------------------|---------------------------------------|--------------------------------------|
-| Submission          | `az ml job create` via YAML templates | `osmo workflow submit`               |
-| Orchestration       | AKS compute targets                   | KAI Scheduler / Volcano integration  |
-| Experiment tracking | MLflow (managed)                      | MLflow (Azure ML backend)            |
+| Aspect              | Azure ML                              | OSMO                                          |
+|---------------------|---------------------------------------|-----------------------------------------------|
+| Submission          | `az ml job create` via YAML templates | `osmo workflow submit`                        |
+| Orchestration       | AKS compute targets                   | KAI Scheduler / Volcano integration           |
+| Experiment tracking | MLflow (managed)                      | MLflow (Azure ML backend)                     |
 | Dataset delivery    | Azure ML datastores                   | Object storage (`url:`) or OSMO bucket upload |
-| Monitoring          | Azure ML Studio                       | OSMO UI Dashboard                    |
-| Payload modes       | Single (YAML template)                | Object storage (`url:`) or dataset injection |
+| Monitoring          | Azure ML Studio                       | OSMO UI Dashboard                             |
+| Payload modes       | Single (YAML template)                | Object storage (`url:`) or dataset injection  |
 
 Azure ML provides managed compute and experiment tracking through Azure ML Studio. OSMO adds distributed training coordination, KAI Scheduler integration, and a dataset versioning system.
 
@@ -137,10 +137,10 @@ Training scripts register checkpoints to Azure ML automatically. Override the mo
 
 OSMO supports two payload delivery modes for training code:
 
-| Mode                  | Script                            | Size Limit | Versioning |
-|-----------------------|-----------------------------------|------------|------------|
+| Mode                    | Script                            | Size Limit | Versioning |
+|-------------------------|-----------------------------------|------------|------------|
 | Object storage (`url:`) | `submit-osmo-training.sh`         | Unlimited  | Per submit |
-| Dataset injection     | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
+| Dataset injection       | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
 
 Dataset injection uploads `training/rl/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
 

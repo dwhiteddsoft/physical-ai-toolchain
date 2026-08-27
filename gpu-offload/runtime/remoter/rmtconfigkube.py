@@ -222,7 +222,8 @@ def rewrite_taskconfig(taskconfig : str):
                 params.pop('remoteableserver', None)
             params.pop('remoteableon', None)
 
-    newtaskconfig = taskconfig.replace(".yaml", "_rewritten.yaml")
+    # Generated state must be outside the read-only ConfigMap mount.
+    newtaskconfig = "/tmp/remoter_rewritten.yaml"
     with open(newtaskconfig, 'w') as f:
         yaml.safe_dump(cfgnew, f)
 

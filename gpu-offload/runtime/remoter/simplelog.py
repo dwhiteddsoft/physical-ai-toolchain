@@ -39,7 +39,7 @@ def is_file_open(path: str) -> bool:
         )
         return bool(result.stdout.strip())  # output means file is open
     except FileNotFoundError:
-        raise RuntimeError("lsof command not found. Install it first.")
+        return False
 
 def rollover(filename, keep=4):
     # rollover log files

@@ -1,0 +1,69 @@
+image:
+  registry: ""
+  repository: gpu-offload-pi05
+  tag: local
+  digest: ""
+  pullPolicy: Never
+
+imagePullSecrets: []
+
+serverStage:
+  name: gpu
+  # Leave the repository empty to reuse the client image; both sides need the same
+  # lerobot runtime.
+  image:
+    repository: ""
+    tag: ""
+  gpu:
+    resourceName: nvidia.com/gpu
+    quantity: "1"
+  # pi05 loads roughly 7 GB of weights and needs headroom for the CUDA context and the
+  # PaliGemma tokenizer cache.
+  resources:
+    requests:
+      cpu: "2"
+      memory: 16Gi
+    limits:
+      cpu: "8"
+      memory: 32Gi
+
+# Trained checkpoint, mounted read-only from the node filesystem. The controller
+# refuses to copy hostPath volumes into a generated server pod, so the checkpoint is
+# published as a hostPath PersistentVolume and consumed through a claim.
+# hostPath is machine-local and has no default: set PI05_MODEL_HOST_PATH in .env, or
+# pass --set model.hostPath=<dir> when installing the chart directly.
+model:
+  hostPath: ""
+  mountPath: /models/pi05
+  capacity: 16Gi
+
+# PaliGemma tokenizer cache. pi05 loads a gated tokenizer that must already be present
+# on the node; the pods run with HF_HUB_OFFLINE=1. Set PI05_HF_CACHE_HOST_PATH in .env.
+huggingFaceCache:
+  hostPath: ""
+  mountPath: /hf-cache
+  capacity: 8Gi
+
+policy:
+  # pi05 is language-conditioned and was trained single-task on this verbatim string.
+  task: "Pick up the gear and place it in the box."
+  # Training fps. The model returns absolute joint targets meant to replay at this rate.
+  fps: "15"
+  cameras: "scene,wrist"
+  # Drive the loop with zeroed state and blank frames so the offload path can be
+  # verified without a robot.
+  dryRun: false
+  # Guard for real motion; the bridge refuses to command the arm unless this is true.
+  enableMotion: false
+
+clientResources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+# Pin the control pod to the node holding the checkpoint and the GPU. Closed-loop
+# control also benefits from keeping offload traffic on one host.
+nodeSelector: {}

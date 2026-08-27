@@ -24,6 +24,12 @@ data:
     remoteclasses:
       - {{ .Values.offload.remoteClass | quote }}:
           remoteloc: {{ .Values.offload.stageName | quote }}
+      {{- if .Values.offload.rawObservation.enabled }}
+      - {{ .Values.offload.rawObservation.remoteClass | quote }}:
+          remoteloc: {{ .Values.offload.stageName | quote }}
+          noremotefuncs:
+            - notify_observation
+      {{- end }}
     remotefuncs:
       - {{ .Values.offload.loadFunction | quote }}:
           singleinstance: true

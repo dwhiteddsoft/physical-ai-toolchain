@@ -182,3 +182,18 @@ Enable aggregated control-loop timing for a rollout:
 Timing summaries report mean, p50, p95, and maximum latency for camera access,
 serial reads and writes, observation preparation, remote policy calls, action
 dispatch, and related control-loop stages. Timing is disabled by default.
+
+Move image conversion and the policy processor pipeline to the offload server:
+
+```bash
+./scripts/install_k8s_rollout.sh --offload \
+  --set offload.rawObservation.enabled=true
+```
+
+This mode sends compact `uint8` camera tensors instead of normalized `float32`
+tensors. It applies only to synchronous inference and is disabled by default.
+
+## 📊 Results
+
+See [raw observation offload results](results/README.md) for real-hardware
+`float32` and `uint8` timing tables, measurement methodology, and analysis.

@@ -57,6 +57,13 @@ spec:
             - python
             - -c
             - |
+              {{- if .Values.offload.rawObservation.enabled }}
+              import os
+
+              from raw_observation_inference import validate_raw_observation_offload
+
+              validate_raw_observation_offload(os.environ["POLICY_PATH"], os.environ["ROBOT_TYPE"])
+              {{- else }}
               import os
               from pathlib import Path
 
@@ -77,6 +84,7 @@ spec:
               }
               action = policy.select_action(batch)
               print(f"ACT action: shape={tuple(action.shape)}, device={action.device}")
+              {{- end }}
           {{- else }}
           command:
             - /opt/xavier/lerobot/scripts/rollout.sh

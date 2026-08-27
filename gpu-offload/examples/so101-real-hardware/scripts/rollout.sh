@@ -118,6 +118,12 @@ main() {
       /opt/xavier/lerobot/diagnostics/rollout_timing.py
       "${command[@]:1}"
     )
+  elif [[ "${ROLLOUT_RAW_OBSERVATION_OFFLOAD:-false}" == "true" ]]; then
+    command=(
+      python
+      /opt/xavier/lerobot/diagnostics/raw_observation_inference.py
+      "${command[@]:1}"
+    )
   fi
 
   for (( episode = 1; episode <= episodes; episode++ )); do

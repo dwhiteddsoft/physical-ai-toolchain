@@ -11,5 +11,6 @@ data:
   ROBOT_CAMERAS: {{ .Values.rollout.robotCameras | quote }}
   LEROBOT_FPS: {{ .Values.rollout.fps | quote }}
   POLICY_PATH: {{ .Values.rollout.policyPath | quote }}
+  ROLLOUT_RAW_OBSERVATION_OFFLOAD: {{ .Values.offload.rawObservation.enabled | quote }}
   ROLLOUT_TIMING_ENABLED: {{ .Values.rollout.timing.enabled | quote }}
   ROLLOUT_TIMING_REPORT_EVERY: {{ .Values.rollout.timing.reportEvery | quote }}

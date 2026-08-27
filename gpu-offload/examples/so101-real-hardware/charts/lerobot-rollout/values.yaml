@@ -64,6 +64,9 @@ offload:
   logLevel: INFO
   printLogLevel: INFO
   stageName: gpu
+  rawObservation:
+    enabled: false
+    remoteClass: raw_observation_inference/RawObservationSyncInferenceEngine
   server:
     replicas: 1
     nodeSelector: {}

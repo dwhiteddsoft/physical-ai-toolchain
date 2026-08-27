@@ -144,6 +144,7 @@ def _install_profiler() -> _TimingRegistry:
     from lerobot.rollout.robot_wrapper import ThreadSafeRobot
     from lerobot.rollout.strategies import base as base_strategy
     from lerobot.rollout.strategies import core as strategy_core
+    from raw_observation_inference import RawObservationSyncInferenceEngine
 
     registry = _TimingRegistry(_parse_report_every())
 
@@ -152,14 +153,16 @@ def _install_profiler() -> _TimingRegistry:
     _wrap_method(registry, OpenCVCamera, "read_latest", "camera_read_latest")
     _wrap_method(registry, ThreadSafeRobot, "get_observation", "robot_observation")
     _wrap_method(registry, ThreadSafeRobot, "send_action", "robot_send_action")
-    _wrap_method(registry, sync_inference.SyncInferenceEngine, "get_action", "inference_total")
-    _wrap_method(registry, ACTPolicy, "select_action", "policy_select_action_rpc")
-
-    sync_inference.prepare_observation_for_inference = _timed(
-        registry,
-        "prepare_observation",
-        sync_inference.prepare_observation_for_inference,
-    )
+    if os.environ.get("ROLLOUT_RAW_OBSERVATION_OFFLOAD", "false").lower() == "true":
+        _wrap_method(registry, RawObservationSyncInferenceEngine, "get_action", "inference_total")
+    else:
+        _wrap_method(registry, sync_inference.SyncInferenceEngine, "get_action", "inference_total")
+        _wrap_method(registry, ACTPolicy, "select_action", "policy_select_action_rpc")
+        sync_inference.prepare_observation_for_inference = _timed(
+            registry,
+            "prepare_observation",
+            sync_inference.prepare_observation_for_inference,
+        )
     strategy_core.build_dataset_frame = _timed(
         registry,
         "build_dataset_frame",
@@ -201,6 +204,9 @@ def _install_profiler() -> _TimingRegistry:
 
 
 def main() -> None:
+    from raw_observation_inference import install_raw_observation_offload
+
+    install_raw_observation_offload()
     _install_profiler()
 
     from lerobot.scripts.lerobot_rollout import main as rollout_main

@@ -1,7 +1,7 @@
 ---
 title: GPU Offload Work Items
 description: Track pending GPU-offload implementation work
-ms.date: 2026-08-19
+ms.date: 2026-08-28
 ms.topic: reference
 ---
 
@@ -13,31 +13,30 @@ Track implementation work that has been identified but not completed. Remove eac
 
 Target files: [`mise.toml`](../mise.toml), [`scripts`](../scripts/), [`examples`](../examples/)
 
-The current tasks predate
-[`mise-tasks.instructions.md`](../../.github/instructions/mise-tasks.instructions.md) and violate it
-in three ways: task bodies are embedded shell scripts inside the TOML, names use numeric segments
-instead of colon-separated groups, and the resulting `mise tasks` listing does not read as the
-order a new contributor should follow after cloning.
+The tasks have been extracted into scripts and reordered to match the execution path. One
+deviation from [`mise-tasks.instructions.md`](../../.github/instructions/mise-tasks.instructions.md)
+remains: group prefixes are hyphen-separated (`d-offload-50-deploy`) rather than
+colon-separated, so related tasks do not match a single `mise run` pattern.
 
 ### Mise Task Implementation
 
-* [ ] Move every embedded `run` body out of `mise.toml` into a script file, leaving each task as an invocation of that script.
-* [ ] Place platform-wide scripts in `gpu-offload/scripts` and example-specific scripts in `gpu-offload/examples`, prefixed with the example name.
+* [x] Move every embedded `run` body out of `mise.toml` into a script file, leaving each task as an invocation of that script.
+* [x] Place platform-wide scripts in `gpu-offload/scripts` and example-specific scripts in `gpu-offload/examples`, prefixed with the example name.
 * [ ] Regroup task names with colon-separated prefixes so related tasks match a single pattern.
-* [ ] Start every task name with a letter, never a digit or symbol.
-* [ ] Order the groups so the alphanumeric sort matches the human path: setup, deploy, verify, develop, then teardown.
-* [ ] Update the READMEs and walkthroughs that reference the old task names.
+* [x] Start every task name with a letter, never a digit or symbol.
+* [x] Order the groups so the alphanumeric sort matches the human path: setup, deploy, verify, develop, then teardown.
+* [x] Update the READMEs and walkthroughs that reference the old task names.
 
 ### Mise Task Acceptance Criteria
 
-* `mise.toml` contains no multi-line shell bodies.
-* `mise tasks` lists the groups in the order a contributor executes them.
-* Each script is independently executable and passes `shellcheck`.
-* Every documented command matches a task that exists.
+* [x] `mise.toml` contains no multi-line shell bodies.
+* [x] `mise tasks` lists the groups in the order a contributor executes them.
+* [x] Each script is independently executable and passes `shellcheck`.
+* [ ] Every documented command matches a task that exists.
 
 ### Mise Task Validation
 
-* [ ] Run `shellcheck` over the extracted scripts.
+* [x] Run `shellcheck` over the extracted scripts.
 * [ ] Run the full first-run path through the renamed tasks.
 
 ## Local Podman and kind Hardening

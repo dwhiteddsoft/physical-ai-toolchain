@@ -22,7 +22,7 @@ is opt-in through workload label and annotation.
 
 ## 🚀 Quick Start
 
-For a zero-to-verification Podman and kind walkthrough, start with [docs/README.md](./docs/README.md). The guide contains CPU-only and WSL2 NVIDIA paths built on the same first-run example.
+For a zero-to-verification local walkthrough, start with [docs/README.md](./docs/README.md). It covers the CPU-only, WSL2 NVIDIA, and bare-metal NVIDIA paths, all built on the same [first-run example](./examples/first-run/README.md).
 
 1. Install the control plane:
 

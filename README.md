@@ -15,11 +15,12 @@ Physical AI and robotics are moving from headlines and experimentation into real
 
 Physical AI is the strategic inflection point for AI platforms, and robotics is the hero use case. It sits at the intersection of cloud, edge, data, and agentic AI.
 
-**Physical AI Toolchain** is an open-source, production-ready framework that integrates [Microsoft Azure](https://azure.microsoft.com/) cloud services with [NVIDIA's](https://developer.nvidia.com/) physical AI stack, accelerating robotics and physical AI developers to automate and scale data curation, augmentation, and evaluation across perception, mobility, imitation learning, and reinforcement learning pipelines. It provides:
+**Physical AI Toolchain** is an open-source, production-ready framework that integrates [Microsoft Azure](https://azure.microsoft.com/) cloud services with [NVIDIA's](https://developer.nvidia.com/) physical AI stack, accelerating robotics and physical AI developers to automate and scale data curation, augmentation, evaluation across perception, mobility, imitation learning, and reinforcement learning pipelines, along with efficient inference. It provides:
 
 - **Accelerate physical AI innovation.** From edge data capture on NVIDIA Jetson devices through cloud-based training on GPU clusters to model deployment at the edge, every stage of the physical AI lifecycle is addressed with tested, repeatable automation.
 - **Operationalize physical intelligence.** Built on Azure Machine Learning, Azure Kubernetes Service, Azure Arc, and Azure Storage with Entra ID authentication, managed identities, and Infrastructure as Code, so workloads meet the security, compliance, and governance requirements of production environments.
 - **Scale through ecosystem collaboration.** Native support for NVIDIA Isaac Sim and Isaac Lab for simulation and reinforcement learning, NVIDIA OSMO for workflow orchestration, and the NVIDIA Jetson platform for edge inference provides a hardware-accelerated path from research to deployment, enabled by deep partnership across the ecosystem.
+- **Efficient Inference.** Seamless capability to offload inference out of the robot to an on-premise GPU with minimal overhead using Kubernetes operators, towards benefits of energy/battery lifetime as well as cost.
 - **Human-robot-AI agent collaboration.** Agentic engineering lets teams move from isolated machines to coordinated, instruction-driven workflows. AI agents can turn high-level instructions into executed pipelines, but they are a convenience layer, not a requirement. Start with manual workflows, introduce agents when you are ready, and customize their behavior to match your team's trust boundaries.
 - **Broad physical AI applicability.** While robotics is the hero use case, the architecture supports any physical AI workload that follows the simulate → train → evaluate → deploy pattern, including autonomous mobile robots, robotic manipulation, industrial inspection, and embodied AI research.
 
@@ -96,6 +97,7 @@ read the tier-by-tier infrastructure boundaries in the
 | **Training Infrastructure**     | OSMO + Azure ML integration for scalable RL and IL training with experiment tracking                        |
 | **Model Evaluation**            | Offline replay evaluation, Isaac Sim evaluation, and evaluation dashboards                                  |
 | **Model Deployment**            | ONNX/TensorRT conversion, container packaging, and GitOps-based edge deployment                             |
+| **Edge Inference**              | Offloaded inference to remote GPU containers on on-premise edge                                             |
 | **Agentic Workflows**           | Instruction-driven agents that orchestrate data collection, training, evaluation, and deployment end-to-end |
 | **Hybrid Architecture**         | Azure Arc, air-gapped training support, and MQTT telemetry for connected and disconnected sites             |
 
@@ -108,6 +110,7 @@ read the tier-by-tier infrastructure boundaries in the
 - **Enterprise Security:** Entra ID integration with managed identities
 - **CI/CD Integration:** Automated deployment pipelines with GitHub Actions
 - **Edge-to-Cloud Data Pipeline:** Automated capture, upload, conversion, and validation
+- **Offloaded Inference:** Automatic GPU container creation, deployment, and inference over RPCs
 - **Multi-Modal Training:** Support for reinforcement learning and imitation learning workflows
 - **Agentic Pipeline Orchestration:** Describe a task; agents handle data collection through policy deployment
 
@@ -255,6 +258,8 @@ This toolchain builds upon:
 - [NVIDIA OSMO](https://developer.nvidia.com/osmo): workflow orchestration
 - [LeRobot](https://github.com/huggingface/lerobot): imitation learning dataset format
 - Built with [HVE Core](https://github.com/microsoft/hve-core)
+- [Offload or Overload: A Platform Measurement Study of Mobile Robotic Manipulation Workloads](https://arxiv.org/abs/2603.18284)
+
 
 ## 🤖 Responsible AI
 

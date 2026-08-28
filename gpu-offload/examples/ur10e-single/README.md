@@ -77,7 +77,7 @@ moves toward that limit.
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while
 > another offload example holds the device, and scaling that example down is not enough:
 > the controller recreates a server stage for as long as its client deployment exists.
-> Uninstall the other example first, for example `mise run e-pi05-90-teardown`.
+> Uninstall the other example first, for example `mise run d-offload-90-teardown`.
 
 ## 🚀 Run
 

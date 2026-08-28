@@ -19,7 +19,9 @@ kubectl config use-context "kind-${GPU_OFFLOAD_CLUSTER}"
 
 ## Ref 40: Build Images
 
-Build the admission controller and shared client/server runtime with Podman:
+Build the admission controller, the remoter payload image, and the client image with Podman.
+
+The payload image is `FROM scratch` and only holds the `runtime/` source tree. It is not runnable: the client build copies the SDK out of it with `COPY --from`, installs it against its own interpreter, and puts the `sitecustomize` hook on `PYTHONPATH`. Python then starts the offload runtime before any application code imports, which is what lets `client.py` and `demo_model.py` stay free of SDK references.
 
 ```bash
 CONTROLLER_INDEX_ARGS=()
@@ -36,7 +38,14 @@ podman build \
   gpu-offload/controller
 
 podman build \
+  --file gpu-offload/runtime/Containerfile \
+  --tag localhost/pyremote:local \
+  gpu-offload/runtime
+
+podman build \
   --file gpu-offload/examples/first-run/Containerfile \
+  --target client \
+  --build-arg REMOTER_IMAGE=localhost/pyremote:local \
   "${RUNTIME_INDEX_ARGS[@]}" \
   --tag localhost/gpu-offload-first-run:local \
   .
@@ -44,6 +53,8 @@ podman build \
 podman image exists localhost/xavier-mutate:local
 podman image exists localhost/gpu-offload-first-run:local
 ```
+
+`--target client` is required. The Containerfile also publishes a `gpu` stage that layers torch on the same image, and it is the last stage in the file, so an unnamed target builds the wrong one. The CPU path never needs that stage: the chart reuses the client image for the server.
 
 The default builds use the package installers' public indexes. Set `PYTHON_INDEX_URL` when the network requires a credential-free Python package mirror:
 
@@ -188,9 +199,32 @@ export GPU_OFFLOAD_CLUSTER=gpu-offload-nvidia
 kubectl config use-context "kind-${GPU_OFFLOAD_CLUSTER}"
 ```
 
+### Ref 59: Build and Load the GPU Stage Image
+
+The GPU stage runs a torch model, and the client image deliberately ships without torch. Build the `gpu` stage of the same Containerfile and load it into the node:
+
+```bash
+podman build \
+  --file gpu-offload/examples/first-run/Containerfile \
+  --target gpu \
+  --build-arg REMOTER_IMAGE=localhost/pyremote:local \
+  "${RUNTIME_INDEX_ARGS[@]}" \
+  --tag localhost/gpu-offload-first-run-gpu:local \
+  .
+
+podman save \
+  --output /tmp/gpu-offload-first-run-gpu-local.tar \
+  localhost/gpu-offload-first-run-gpu:local
+kind load image-archive \
+  /tmp/gpu-offload-first-run-gpu-local.tar \
+  --name "$GPU_OFFLOAD_CLUSTER"
+```
+
+Both images carry the same `sitecustomize` hook and the same application modules, so the offload seam resolves identically on each side of the call.
+
 ### Ref 60: Set Up the NVIDIA Stage
 
-Install the shared example resources with the NVIDIA server-stage values. The same image values configure the client and generated server:
+Install the shared example resources with the NVIDIA server-stage values. The client keeps the slim image; only the generated server moves to the torch image:
 
 ```bash
 helm --kube-context "kind-${GPU_OFFLOAD_CLUSTER}" upgrade --install \
@@ -199,7 +233,13 @@ helm --kube-context "kind-${GPU_OFFLOAD_CLUSTER}" upgrade --install \
   --create-namespace \
   --set image.registry=localhost \
   --set serverStage.name=nvidia \
-  --set serverStage.wslNvidia.enabled=true
+  --set serverStage.gpu.enabled=true \
+  --set serverStage.gpu.platform=wsl-nvidia \
+  --set serverStage.image.repository=gpu-offload-first-run-gpu \
+  --set serverStage.resources.requests.cpu=500m \
+  --set serverStage.resources.requests.memory=2Gi \
+  --set serverStage.resources.limits.cpu=4 \
+  --set serverStage.resources.limits.memory=8Gi
 
 kubectl --context "kind-${GPU_OFFLOAD_CLUSTER}" wait --for=create \
   deployment/first-run-client-remote-server-nvidia \
@@ -284,7 +324,8 @@ helm --kube-context "kind-${GPU_OFFLOAD_CLUSTER}" uninstall gpu-offload --namesp
 kubectl --context "kind-${GPU_OFFLOAD_CLUSTER}" delete namespace gpu-offload
 rm -f \
   /tmp/xavier-mutate-local.tar \
-  /tmp/gpu-offload-first-run-local.tar
+  /tmp/gpu-offload-first-run-local.tar \
+  /tmp/gpu-offload-first-run-gpu-local.tar
 ```
 
 Delete the cluster with the cleanup command in [Local Podman and kind Setup](./01-local-kubernetes-setup.md#cleanup).

@@ -154,30 +154,6 @@ description = "Remove the offload workloads and demo state from the cluster"
 run = "examples/first-run/scripts/teardown.sh"
 
 # ==============================================================================
-# Pi0.5 example
-# ==============================================================================
-
-[tasks."e-pi05-40-build-image"]
-description = "Build the pi05 control and server-stage image with Podman"
-run = "examples/pi05/scripts/build-image.sh"
-
-[tasks."e-pi05-41-load-image"]
-description = "Load the pi05 image into the resolved cluster"
-run = "examples/pi05/scripts/load-image.sh"
-
-[tasks."e-pi05-50-deploy"]
-description = "Deploy the pi05 control loop and its GPU server stage"
-run = "examples/pi05/scripts/deploy.sh"
-
-[tasks."e-pi05-51-check-inference"]
-description = "Verify that pi05 loaded on the GPU stage and returns actions to the client"
-run = "examples/pi05/scripts/check-inference.sh"
-
-[tasks."e-pi05-90-teardown"]
-description = "Remove the pi05 workloads and their host-path volumes"
-run = "examples/pi05/scripts/teardown.sh"
-
-# ==============================================================================
 # ur10e-single example
 # ==============================================================================
 

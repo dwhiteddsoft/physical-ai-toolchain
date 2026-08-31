@@ -1,10 +1,16 @@
+"""Control-container entry point for the first-run offload check.
+
+Nothing here imports the remoter SDK. The image places its sitecustomize hook on
+PYTHONPATH, so the interpreter starts the offload runtime before this module is
+loaded and the functions named in remote.yaml are already rewritten into remote
+calls by the time they are imported below.
+"""
+
 from __future__ import annotations
 
 import json
 import os
 import time
-
-from remoter import autoremote
 
 # cspell:ignore nvidiactl
 
@@ -20,8 +26,10 @@ def client_gpu_devices() -> list[str]:
 
 
 def main() -> None:
-    autoremote.start(False)
-
+    # Imported after the interpreter has started the offload runtime, so predict
+    # is already the remoted version. gpu_model stays behind the GPU_CHECK gate:
+    # on CPU platforms it is absent from remote.yaml, and calling it locally would
+    # fail on the torch the client image deliberately does not ship.
     from demo_model import predict
 
     gpu_inference = None

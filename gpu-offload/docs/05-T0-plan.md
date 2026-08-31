@@ -1,7 +1,7 @@
 ---
 title: GPU Offload T0 Plan
 description: Close the gap between the GPU-offload domain and the local T0 robot lifecycle
-ms.date: 2026-08-12
+ms.date: 2026-08-28
 ms.topic: roadmap
 ---
 
@@ -17,12 +17,13 @@ the final run-on-robot stage.
 
 No GPU-offload guide currently delivers the complete T0 robot target.
 
-| Existing guide or example                                                 | What it proves                                                                      | Remaining T0 gap                                                        |
-|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [GPU Offload First Run](./README.md)                                      | Admission, server creation, discovery, transport, and remote execution              | Valid optional local-Kubernetes substrate, but no robot lifecycle       |
-| [First Local Offload](./02-first-local-offload.md)                        | CPU and WSL2 GPU execution in generated server-stage pods                           | Does not consume a trained robot policy or connect to ROS 2 hardware    |
-| [SO-101 real-hardware example](../examples/so101-real-hardware/README.md) | Intended ROS 2 and SmolVLA offload boundary                                         | Requires operator-built images and has not passed end-to-end validation |
-| [Tier 0 recipe](../../docs/recipes/tier-0-dev/README.md)                  | Capture, curate, train, validate, and manual inference without cloud infrastructure | Does not connect the final inference process to the GPU-offload runtime |
+| Existing guide or example                                                 | What it proves                                                                      | Remaining T0 gap                                                         |
+|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| [GPU Offload Local Guides](./README.md)                                   | Admission, server creation, discovery, transport, and remote execution              | Valid optional local-Kubernetes substrate, but no robot lifecycle        |
+| [First Local Offload](./02-first-local-offload.md)                        | CPU, WSL2 GPU, and bare-metal GPU execution in generated server-stage pods          | Does not consume a trained robot policy or connect to ROS 2 hardware     |
+| [ur10e-single example](../examples/ur10e-single/README.md)                | A real policy offloaded to a GPU stage, driving hardware through a closed loop      | Needs a UR10e, a 7 GB checkpoint on the node, and a Kubernetes cluster   |
+| [SO-101 real-hardware example](../examples/so101-real-hardware/README.md) | Pinned LeRobot workflows for collection, fine-tuning, evaluation, and rollout       | Has not passed end-to-end validation on hardware with offloading enabled |
+| [Tier 0 recipe](../../docs/recipes/tier-0-dev/README.md)                  | Capture, curate, train, validate, and manual inference without cloud infrastructure | Does not connect the final inference process to the GPU-offload runtime  |
 
 T0 permits two local profiles:
 
@@ -98,16 +99,14 @@ capture, curation, training, or evaluation tooling.
 
 ### SO-101 and VLA Integration
 
-| Gap                                                 | Current evidence                                                                    | Required change                                                                              |
-|-----------------------------------------------------|-------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| Remoting startup is not explicit                    | `run_vla.py` does not call `autoremote.start(False)`                                | Initialize remoting through an explicit application entry point                              |
-| VLA payload types are unsupported                   | The MessagePack registry has no NumPy or PyTorch tensor adapter                     | Add bounded, explicit ndarray and tensor adapters with dtype and shape validation            |
-| Payload limits are not sized from real observations | The codec defaults to an 8 MiB encoded-message limit                                | Measure two-camera observations and configure tested limits without unbounded messages       |
-| Model placement is ambiguous                        | The control script calls `SmolVLAPolicy.from_pretrained()` before `select_action()` | Define server-owned model loading so weights are not loaded in the control process           |
-| Checkpoint contract is unspecified                  | The example uses a placeholder path                                                 | Accept the checkpoint produced by the T0 LeRobot training command and validate it at startup |
-| Container image is operator-supplied                | The example provides no buildable control or inference image                        | Add reproducible local image definitions or a documented `uv` process path                   |
-| ROS 2 camera topics are placeholders                | The example requires operator topic edits                                           | Add a checked configuration file and a preflight topic/shape check                           |
-| Hardware path is unvalidated                        | The example states that it has not passed end-to-end validation                     | Add staged acceptance from fake topics to torque-disabled hardware to supervised motion      |
+| Gap                                                 | Current evidence                                                                   | Required change                                                                              |
+|-----------------------------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| VLA payload types are partly unsupported            | `class2dict` encodes torch tensors; the registry still has no NumPy adapter        | Add a bounded, explicit ndarray adapter with dtype and shape validation                      |
+| Payload limits are not sized from real observations | The codec defaults to an 8 MiB encoded-message limit                               | Measure two-camera observations and configure tested limits without unbounded messages       |
+| Model placement is ambiguous                        | The rollout path loads the policy in the control process unless a stage remotes it | Define server-owned model loading so weights are not loaded in the control process           |
+| Checkpoint contract is unspecified                  | The example takes an operator-supplied checkpoint path                             | Accept the checkpoint produced by the T0 LeRobot training command and validate it at startup |
+| ROS 2 camera topics are placeholders                | The example requires operator topic edits                                          | Add a checked configuration file and a preflight topic/shape check                           |
+| Hardware path is unvalidated                        | The example states that it has not passed end-to-end validation                    | Add staged acceptance from fake topics to torque-disabled hardware to supervised motion      |
 
 ### Control-Loop Safety and Operations
 
@@ -137,15 +136,15 @@ capture, curation, training, or evaluation tooling.
 
 ### Changes to Existing Artifacts
 
-| Path                                                                     | Change                                                                                             |
-|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `runtime/pyproject.toml`                                                 | Keep the core transport local-only and move Kubernetes packages into an extra                      |
-| `runtime/remoter/autoremote.py`                                          | Select `local` or `kubernetes` discovery explicitly and fail on invalid configuration              |
-| `runtime/remoter/rmtconfigkube.py`                                       | Retain pod discovery only; reuse provider-neutral config compilation                               |
-| `runtime/remoter/remoter.py`                                             | Register bounded application adapters and expose deterministic readiness and shutdown              |
-| `examples/so101-real-hardware/ros2_bridge/examples/so101_ros/run_vla.py` | Add explicit remoting startup, direct/offloaded mode selection, deadlines, and stale-result guards |
-| `examples/so101-real-hardware/README.md`                                 | Separate T0 local instructions from T3-T4 Kubernetes deployment                                    |
-| `gpu-offload/README.md`                                                  | Link the validated T0 guide and distinguish local from remote Kubernetes                           |
+| Path                                              | Change                                                                                |
+|---------------------------------------------------|---------------------------------------------------------------------------------------|
+| `runtime/pyproject.toml`                          | Keep the core transport local-only and move Kubernetes packages into an extra         |
+| `runtime/remoter/autoremote.py`                   | Select `local` or `kubernetes` discovery explicitly and fail on invalid configuration |
+| `runtime/remoter/rmtconfigkube.py`                | Retain pod discovery only; reuse provider-neutral config compilation                  |
+| `runtime/remoter/remoter.py`                      | Register bounded application adapters and expose deterministic readiness and shutdown |
+| `examples/so101-real-hardware/scripts/rollout.sh` | Add direct/offloaded mode selection, inference deadlines, and stale-result guards     |
+| `examples/so101-real-hardware/README.md`          | Separate T0 local instructions from T3-T4 Kubernetes deployment                       |
+| `gpu-offload/README.md`                           | Link the validated T0 guide and distinguish local from remote Kubernetes              |
 
 ## Delivery Sequence
 

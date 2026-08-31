@@ -9,10 +9,13 @@ Kubernetes manifest rather than by rewriting the deployment around an SDK.
 
 ## 🧭 What This Example Demonstrates
 
-The other examples in this directory build a purpose-written client around the offload
-SDK. This one takes the opposite path, which is the pattern from the xavier tutorial's
-`Dockerfile.pyremote2`: an existing workload image is layered with the SDK and a
+The offload pattern from the xavier tutorial's `Dockerfile.pyremote2`, applied to a real
+robot deployment: an existing workload image is layered with the SDK and a
 `sitecustomize` hook, and Python installs the offload before any application code runs.
+[`first-run`](../first-run/README.md) shows the same layering at minimal size with no
+hardware; this example carries the parts that only appear with a real workload, namely a
+7 GB checkpoint that must stay resident on the stage and a closed control loop that
+cannot afford to send it over the wire.
 
 | Layer                | Source                                                         | Role                                                           |
 |----------------------|----------------------------------------------------------------|----------------------------------------------------------------|
@@ -77,7 +80,7 @@ moves toward that limit.
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while
 > another offload example holds the device, and scaling that example down is not enough:
 > the controller recreates a server stage for as long as its client deployment exists.
-> Uninstall the other example first, for example `mise run e-pi05-90-teardown`.
+> Uninstall the other example first, for example `mise run d-offload-90-teardown`.
 
 ## 🚀 Run
 

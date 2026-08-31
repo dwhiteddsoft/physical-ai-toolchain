@@ -1,107 +1,43 @@
 ---
 title: GPU Offload Work Items
 description: Track pending GPU-offload implementation work
-ms.date: 2026-08-19
+ms.date: 2026-08-28
 ms.topic: reference
 ---
 
-<!-- cspell:ignore simplelog Robotiq RealSense pyrealsense servoj movej pretrained -->
+<!-- cspell:ignore simplelog -->
 
 Track implementation work that has been identified but not completed. Remove each task after its code changes and validation are merged.
-
-## Pi05 UR10e Real-Robot Motion
-
-Target directory: [`examples/pi05`](../examples/pi05/)
-
-The pi05 example offloads inference to a GPU server stage and is verified end to end in dry-run
-mode. `RobotBridge` in [`ur10e_bridge.py`](../examples/pi05/ur10e_bridge.py) is still the only
-unimplemented seam: `read_state`, `read_frames`, and `send_action` raise `NotImplementedError`
-unless `PI05_DRY_RUN=true`. The arm therefore does not move yet.
-
-### Pi05 Progress Log
-
-| Date       | Entry                                                                                                                                                                           |
-|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 2026-08-19 | Example added: policy wrapper, control loop, chart, offload spec, isolated `uv.lock`, container image, and `pi05-*` tasks.                                                      |
-| 2026-08-19 | Offload verified on the k3s GPU host. The GPU stage loaded the checkpoint on an RTX 5090 and returned actions to the client pod at roughly 2 to 8 ms per cycle in dry-run mode. |
-| 2026-08-19 | Fixed the dry-run state width. The checkpoint consumes six joint values plus one gripper value; a six-value vector failed with a tensor size mismatch.                          |
-| 2026-08-19 | Fixed a deploy race by parking the client at zero replicas until the generated server stage is ready.                                                                           |
-| 2026-08-19 | Confirmed the controller is reachable: dashboard port 29999 on 192.168.2.102 accepts connections from the GPU host.                                                             |
-| 2026-08-19 | Confirmed both cameras are attached to the GPU host: RealSense D405 and RealSense D435i, enumerated as `/dev/video*`.                                                           |
-
-### Pi05 Robot Interfaces
-
-| Port  | Interface        | Use                                                                                |
-|-------|------------------|------------------------------------------------------------------------------------|
-| 29999 | Dashboard        | Text protocol for robot mode, safety mode, power, and brake release                |
-| 30002 | Secondary client | Accepts URScript; this is the interface that moves the arm                         |
-| 30003 | Realtime client  | 125 Hz binary stream of joint angles, TCP pose, and modes                          |
-| 30004 | RTDE             | Structured real-time protocol used by the `ur_rtde` control and receive interfaces |
-| 63352 | Gripper          | Robotiq socket interface on the controller                                         |
-
-### Pi05 Open Questions
-
-* Camera source: capture the RealSense pair directly in the control container, or read the frames the ROS 2 operator stack already publishes.
-* Contention: only one RTDE control script can own the arm, so the operator follower node and this control loop cannot drive it at the same time.
-* Motion policy: the initial move sequence, the servo rate relative to the 15 Hz training rate, and which safety gates must pass before motion is enabled.
-
-### Pi05 Motion Implementation
-
-* [ ] Implement `read_state` as six joint positions plus the gripper value, ordered as in the training dataset.
-* [ ] Implement `read_frames` for the `scene` and `wrist` cameras as JPEG-encoded RGB at the trained 224 by 224 resolution.
-* [ ] Implement `send_action` against the joint-target interface, keeping `PI05_ENABLE_MOTION` as the gate that separates observation from motion.
-* [ ] Apply per-joint clamps before every command and reject stale or non-finite actions.
-* [ ] Move the arm to the home pose before the first predicted action, because the checkpoint expects to start inside its training distribution.
-* [ ] Give the control container the network path and device access the robot and cameras require, and document both in the example README.
-* [ ] Stop motion cleanly on shutdown, on connection loss, and when the policy stops returning actions.
-
-### Pi05 Motion Acceptance Criteria
-
-* The control loop reads live joint state and camera frames without dry-run substitutes.
-* Predicted actions reach the arm only when motion is explicitly enabled.
-* Inference still executes on the GPU stage, with the control container holding no model weights.
-* Loss of the robot connection or the policy stage halts motion instead of replaying a stale action.
-* The example README states the required robot address, ports, camera devices, and safety gates.
-
-### Pi05 Motion Validation
-
-* [ ] Run the control loop with motion disabled and confirm live state and frames produce actions from the GPU stage.
-* [ ] Confirm the loop sustains the 15 Hz training rate with live cameras.
-* [ ] Enable motion and confirm the arm tracks predicted actions from the home pose.
-* [ ] Confirm a forced disconnect of the robot or the policy stage stops motion.
 
 ## Mise Task Layout
 
 Target files: [`mise.toml`](../mise.toml), [`scripts`](../scripts/), [`examples`](../examples/)
 
-The current tasks predate
-[`mise-tasks.instructions.md`](../../.github/instructions/mise-tasks.instructions.md) and violate it
-in three ways: task bodies are embedded shell scripts inside the TOML, names use numeric segments
-instead of colon-separated groups, and the resulting `mise tasks` listing does not read as the
-order a new contributor should follow after cloning.
+The tasks have been extracted into scripts and reordered to match the execution path. One
+deviation from [`mise-tasks.instructions.md`](../../.github/instructions/mise-tasks.instructions.md)
+remains: group prefixes are hyphen-separated (`d-offload-50-deploy`) rather than
+colon-separated, so related tasks do not match a single `mise run` pattern.
 
 ### Mise Task Implementation
 
-* [ ] Move every embedded `run` body out of `mise.toml` into a script file, leaving each task as an invocation of that script.
-* [ ] Place platform-wide scripts in `gpu-offload/scripts` and example-specific scripts in `gpu-offload/examples`, prefixed with the example name.
+* [x] Move every embedded `run` body out of `mise.toml` into a script file, leaving each task as an invocation of that script.
+* [x] Place platform-wide scripts in `gpu-offload/scripts` and example-specific scripts in `gpu-offload/examples`, prefixed with the example name.
 * [ ] Regroup task names with colon-separated prefixes so related tasks match a single pattern.
-* [ ] Start every task name with a letter, never a digit or symbol.
-* [ ] Order the groups so the alphanumeric sort matches the human path: setup, deploy, verify, develop, then teardown.
-* [ ] Keep the pi05 tasks aligned with the same grouping rather than carrying a parallel naming scheme.
-* [ ] Update the READMEs and walkthroughs that reference the old task names.
+* [x] Start every task name with a letter, never a digit or symbol.
+* [x] Order the groups so the alphanumeric sort matches the human path: setup, deploy, verify, develop, then teardown.
+* [x] Update the READMEs and walkthroughs that reference the old task names.
 
 ### Mise Task Acceptance Criteria
 
-* `mise.toml` contains no multi-line shell bodies.
-* `mise tasks` lists the groups in the order a contributor executes them.
-* Each script is independently executable and passes `shellcheck`.
-* Every documented command matches a task that exists.
+* [x] `mise.toml` contains no multi-line shell bodies.
+* [x] `mise tasks` lists the groups in the order a contributor executes them.
+* [x] Each script is independently executable and passes `shellcheck`.
+* [ ] Every documented command matches a task that exists.
 
 ### Mise Task Validation
 
-* [ ] Run `shellcheck` over the extracted scripts.
+* [x] Run `shellcheck` over the extracted scripts.
 * [ ] Run the full first-run path through the renamed tasks.
-* [ ] Run the full pi05 path through the renamed tasks.
 
 ## Local Podman and kind Hardening
 

@@ -22,7 +22,7 @@ is opt-in through workload label and annotation.
 
 ## 🚀 Quick Start
 
-For a zero-to-verification Podman and kind walkthrough, start with [docs/README.md](./docs/README.md). The guide contains CPU-only and WSL2 NVIDIA paths built on the same first-run example.
+For a zero-to-verification local walkthrough, start with [docs/README.md](./docs/README.md). It covers the CPU-only, WSL2 NVIDIA, and bare-metal NVIDIA paths, all built on the same [first-run example](./examples/first-run/README.md).
 
 1. Install the control plane:
 
@@ -35,14 +35,12 @@ For a zero-to-verification Podman and kind walkthrough, start with [docs/README.
    to a ConfigMap holding `remote.yaml`.
 
 3. See [examples/so101-real-hardware/README.md](./examples/so101-real-hardware/README.md)
-   for an end-to-end example (SO-101 arm with ROS 2 bridge),
-   [examples/pi05/README.md](./examples/pi05/README.md) for a UR10e driven by a trained
-   Pi0.5 checkpoint mounted on the GPU node, or
-   [examples/ur10e-single/README.md](./examples/ur10e-single/README.md) for the same
-   robot running the unmodified `ur10e-single` deployment with the SDK layered into its
+   for an end-to-end example (SO-101 arm with ROS 2 bridge), or
+   [examples/ur10e-single/README.md](./examples/ur10e-single/README.md) for a UR10e
+   running the unmodified `ur10e-single` deployment with the SDK layered into its
    image through `sitecustomize`
 
-   The `ur10e-single` example is the one with a single-command hardware demo. Once its
+   The `ur10e-single` example provides a single-command hardware demo. Once its
    checkpoint and registry are set up, `mise run g-ur10e-52-demo` deploys the control
    loop, offloads the Pi0.5 policy to a GPU stage pod, drives the arm through the task,
    and homes it again.
@@ -153,7 +151,7 @@ flowchart TB
 | Runtime SDK           | `runtime/remoter/`                                                                                                                | Run inside client and server containers for decoration, discovery, execution, and transport |
 | Runtime internals     | `runtime/remoter/rmtconfigkube.py`, `runtime/remoter/autoremote.py`, `runtime/remoter/safe_codec.py`, `runtime/remoter/msgtcp.py` | Watch Pods, start the server, encode MessagePack, and communicate over TCP                  |
 | Offload configuration | `specifications/remote-spec-schema.md`                                                                                            | Define supported `remote.yaml` fields                                                       |
-| Runnable workloads    | `examples/first-run/`, `examples/so101-real-hardware/`, `examples/pi05/`, `examples/ur10e-single/`                                | Provide client workloads, ConfigMaps, and offload boundaries                                |
+| Runnable workloads    | `examples/first-run/`, `examples/so101-real-hardware/`, `examples/ur10e-single/`                                                  | Provide client workloads, ConfigMaps, and offload boundaries                                |
 
 ### Deployment and admission sequence
 
@@ -266,7 +264,6 @@ pod status. The kubelet does not inspect or forward inference calls.
 | `registry/`                     | Host-local registry and pull-through caches    |
 | `specifications/`               | Remote.yaml schema and opt-in contract         |
 | `examples/so101-real-hardware/` | SO-101 end-to-end example                      |
-| `examples/pi05/`                | Pi0.5 UR10e example, node-local checkpoint     |
 | `examples/ur10e-single/`        | ur10e-single deployment, SDK layered in image  |
 
 Additional reference documents:

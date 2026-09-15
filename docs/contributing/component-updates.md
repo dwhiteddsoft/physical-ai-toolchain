@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-09-02
 ms.topic: how-to
 keywords:
   - component-updates
@@ -81,13 +81,14 @@ Maintainers remain the source of truth — the reviewer is advisory context, not
 Every Python subproject carries a committed `uv.lock` beside its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are not committed.
 
 * **Regenerate** a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml`. Never hand-edit `uv.lock` and never run `uv pip compile` to produce a committed flat file.
-* **Derive** runtime dependencies at build or submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` reads the lock without regenerating it. The OSMO replay mirror ([training/utils/replay-azureml.sh](pathname://../../training/utils/replay-azureml.sh)) derives its requirements this way from `workflows/osmo/uv.lock`.
+* **Install** source-aware LeRobot runtimes with `uv sync --active --frozen --no-config --no-install-project` so `[tool.uv.sources]` package indexes remain part of the runtime contract.
+* **Derive** other runtime dependencies with `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. Both forms read the lock without regenerating it. The OSMO replay mirror ([training/utils/replay-azureml.sh](pathname://../../training/utils/replay-azureml.sh)) uses the export form with `workflows/osmo/uv.lock`.
 * **Constrain** the universal lock to supported platforms with `[tool.uv] environments` (for example linux x86_64 for GPU and Isaac subprojects). Preserve these markers when regenerating.
 * Dependabot regenerates affected locks natively on dependency PRs. The read-only `uv lock --check` gate (see [CI Validation for Dependency PRs](#ci-validation-for-dependency-prs)) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
 
 ## Tool Checksums
 
-The `scripts/security/tool-checksums.json` file is the repository's single source of truth for explicit tool versions and their SHA-256 digests. This file currently manages:
+The `scripts/security/tool-checksums.json` file is the source of truth for tools installed from this manifest. This file currently manages:
 
 * **ORAS**: Fetched inside the GR00T training container to push checkpoints to ACR.
 * **Actionlint**: Used in the devcontainer for GitHub Actions workflow linting.
@@ -104,6 +105,8 @@ When you need to update a tool managed by this manifest (e.g. bumping ORAS to a 
 
 > [!WARNING]
 > Do not attempt to update these tools directly in shell scripts. The CI pinning scanner will flag mismatches if download URLs point to one version while checking against another, but the canonical version and hash live in `tool-checksums.json`.
+
+Other developer-tool versions are pinned at their bootstrap assignment sites. The binary freshness workflow discovers supported literal assignments in tracked shell, PowerShell, JSON, and JSONC files and requires replicated pins to remain consistent. See [`scripts/README.md`](pathname://../../scripts/README.md#-where-pins-live).
 
 ## Manual Update Process
 

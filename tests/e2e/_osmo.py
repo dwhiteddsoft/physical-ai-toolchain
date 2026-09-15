@@ -210,7 +210,33 @@ def _fetch_osmo_workflow_payload(workflow: OSMOWorkflow, repo_root: Path) -> dic
     return payload
 
 
+def _task_statuses(payload: Mapping[str, Any]) -> list[str]:
+    statuses: list[str] = []
+    groups = payload.get("groups")
+    if not isinstance(groups, list):
+        return statuses
+    for group in groups:
+        if not isinstance(group, Mapping):
+            continue
+        tasks = group.get("tasks")
+        if not isinstance(tasks, list):
+            continue
+        for task in tasks:
+            if isinstance(task, Mapping):
+                status = task.get("status")
+                if isinstance(status, str) and status.strip():
+                    statuses.append(status.strip())
+    return statuses
+
+
 def _osmo_status(payload: Mapping[str, Any]) -> str:
+    # OSMO rolls up a task's node-disruption status (e.g. FAILED_BACKEND_ERROR) into a
+    # generic top-level "FAILED" workflow status, which would otherwise mask the more
+    # specific, restart-eligible status from the disruption-recovery logic above.
+    for task_status in _task_statuses(payload):
+        if task_status.upper() in OSMO_NODE_DISRUPTION_STATES:
+            return task_status
+
     status = _find_first_string(payload, ("status", "state", "phase"))
     return status or "UNKNOWN"
 
@@ -1070,3 +1096,81 @@ def submit_osmo_vla_finetune(
         raise AssertionError(f"OSMO VLA fine-tuning e2e submission failed\n\n{format_command_failure(result)}")
 
     return _osmo_workflow_from_submission(result, job_name, "OSMO VLA fine-tuning")
+
+
+def submit_osmo_azureml_replay(
+    repo_root: Path,
+    *,
+    source_run_id: str,
+    source_output_uri: str,
+    model_name: str,
+) -> OSMOWorkflow:
+    """Replay an OSMO output directory into AzureML through the production wrapper."""
+    log_e2e(f"Submitting OSMO AzureML replay for source_run_id={source_run_id}, model={model_name}")
+    result = run_command(
+        [
+            str(repo_root / "training/utils/replay-azureml.sh"),
+            source_run_id,
+            source_output_uri,
+            model_name,
+            "--",
+            "--set",
+            "cpu=1",
+            "memory=2Gi",
+            "--format-type",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"OSMO AzureML replay submission failed\n\n{format_command_failure(result)}")
+
+    return _osmo_workflow_from_submission(
+        result,
+        model_name,
+        "OSMO AzureML replay",
+        correlation_id=source_run_id,
+    )
+
+
+def submit_osmo_replay_output_fixture(
+    repo_root: Path,
+) -> tuple[OSMOWorkflow, str]:
+    """Create a small checkpoint in OSMO persisted workflow output storage."""
+    workflow_name = e2e_name("replay-output")
+    config_result = run_command(["osmo", "config", "show", "WORKFLOW"], cwd=repo_root)
+    if config_result.returncode != 0:
+        raise AssertionError(f"OSMO workflow configuration lookup failed\n\n{format_command_failure(config_result)}")
+    try:
+        workflow_data_uri = json.loads(config_result.stdout)["workflow_data"]["credential"]["endpoint"]
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise AssertionError("OSMO workflow configuration did not contain a workflow-data endpoint") from error
+    if not isinstance(workflow_data_uri, str) or not workflow_data_uri.startswith("azure://"):
+        raise AssertionError(f"OSMO workflow-data endpoint is not an azure:// URI: {workflow_data_uri!r}")
+
+    output_uri = f"{workflow_data_uri.rstrip('/')}/e2e/replay/{workflow_name}"
+    result = run_command(
+        [
+            "osmo",
+            "workflow",
+            "submit",
+            str(repo_root / "tests/e2e/fixtures/osmo-replay-output.yaml"),
+            "--set-string",
+            f"workflow_name={workflow_name}",
+            f"output_uri={output_uri}",
+            "--format-type",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"OSMO replay output submission failed\n\n{format_command_failure(result)}")
+    workflow = _osmo_workflow_from_submission(result, workflow_name, "OSMO replay output")
+    return workflow, output_uri
+
+
+def cleanup_osmo_replay_output(repo_root: Path, output_uri: str) -> None:
+    """Remove an E2E replay fixture from OSMO persisted workflow storage."""
+    result = run_command(["osmo", "data", "delete", output_uri], cwd=repo_root)
+    if result.returncode != 0:
+        raise AssertionError(f"OSMO replay output cleanup failed\n\n{format_command_failure(result)}")

@@ -6,11 +6,15 @@
 
 set -euo pipefail
 
-readonly LEROBOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly LEROBOT_DIR="$(dirname "${LEROBOT_SCRIPT_DIR}")"
-readonly LEROBOT_REPO_ROOT="$(
+LEROBOT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly LEROBOT_SCRIPT_DIR
+LEROBOT_DIR="$(dirname "${LEROBOT_SCRIPT_DIR}")"
+readonly LEROBOT_DIR
+LEROBOT_REPO_ROOT="$(
   git -C "${LEROBOT_DIR}" rev-parse --show-toplevel 2>/dev/null || dirname "${LEROBOT_DIR}"
 )"
+readonly LEROBOT_REPO_ROOT
+# shellcheck disable=SC2034 # consumed by scripts that source common.sh (build_container.sh)
 readonly GPU_OFFLOAD_DIR="${LEROBOT_REPO_ROOT}/gpu-offload"
 
 load_env() {

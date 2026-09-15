@@ -11,7 +11,7 @@ dependencies = [
     "cryptography==46.0.3",
     "filelock==3.20.0",
     "flask==3.1.1",
-    "kubernetes==34.1.0",
+    "kubernetes==35.0.0",
     "msgpack==1.1.1",
     "pyyaml==6.0.2",
     "requests==2.32.5",

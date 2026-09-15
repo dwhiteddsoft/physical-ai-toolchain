@@ -156,7 +156,8 @@ class ConfigServer:
             config = read_config_file(self.configfile)
             return flask.jsonify(config)
         except Exception as e:
-            return flask.jsonify({"error": str(e)}), 500
+            logger.error(f"Error reading configuration: {e}")
+            return flask.jsonify({"error": "failed to read configuration"}), 500
 
     def update_config(self):
         # update the configuration
@@ -168,7 +169,7 @@ class ConfigServer:
         except Exception as e:
             logger.error(f"Error updating configuration: {e}")
             logger.error(f"Cannot parse content: {flask.request.data}")
-            return flask.jsonify({"error": str(e)}), 500
+            return flask.jsonify({"error": "failed to update configuration"}), 500
 
 
 # to test
@@ -197,7 +198,7 @@ if __name__ == "__main__":
     import time
 
     timestart = time.time()
-    c = Config(config_file)
+    c = Config(config_file, lambda *args, **kwargs: print("Config changed:", args, kwargs))
     while (time.time() - timestart) < 50:
         print("Current config:", c.get_config())
         time.sleep(1)

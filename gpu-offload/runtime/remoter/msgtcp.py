@@ -118,6 +118,8 @@ def getMsgReqHandler(
             elif sock.family == socket.AF_INET:
                 # get ep from client address
                 ep = f"tcp://{self.client_address[0]}:{self.client_address[1]}"
+            else:
+                raise ValueError(f"Unsupported socket family for client connection: {sock.family}")
             # initfn handled in setup and closefn handled in finish
             self.msgr = MessengerTCP(self.request, ep, None, handlefn, None)
             if initfn is not None:

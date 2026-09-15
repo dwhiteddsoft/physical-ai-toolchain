@@ -5,4 +5,5 @@ import os
 # server has envvar "SERVER": "true"
 if os.environ.get("SERVER") != "true":
     from remoter import autoremote
+
     autoremote.start(False)

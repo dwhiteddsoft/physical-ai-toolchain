@@ -1,8 +1,9 @@
-from __future__ import annotations
-
 """
 Remote function call module
 """
+
+from __future__ import annotations
+
 # pylint: disable=missing-module-docstring, W0604, W1203, W0719, broad-exception-raised, R0913, R0917
 import asyncio
 import atexit

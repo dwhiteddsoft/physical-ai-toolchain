@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy as np
 import torch
-
 from lerobot.policies import make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import make_robot_action
@@ -80,8 +79,7 @@ class RawObservationSyncInferenceEngine(SyncInferenceEngine):
         for stage in sorted(self._server_timings):
             values_ms = sorted(duration * 1000 for duration in self._server_timings[stage])
             logger.warning(
-                "RAW_OBSERVATION_SERVER_TIMING stage=%s calls=%d mean_ms=%.3f "
-                "p50_ms=%.3f p95_ms=%.3f max_ms=%.3f",
+                "RAW_OBSERVATION_SERVER_TIMING stage=%s calls=%d mean_ms=%.3f p50_ms=%.3f p95_ms=%.3f max_ms=%.3f",
                 stage,
                 len(values_ms),
                 sum(values_ms) / len(values_ms),
@@ -144,8 +142,7 @@ def _tensorize_dataset_frame(function: Any) -> Any:
     def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
         frame = function(*args, **kwargs)
         return {
-            name: torch.from_numpy(value) if isinstance(value, np.ndarray) else value
-            for name, value in frame.items()
+            name: torch.from_numpy(value) if isinstance(value, np.ndarray) else value for name, value in frame.items()
         }
 
     return wrapper
@@ -177,8 +174,8 @@ def install_raw_observation_offload() -> None:
     if _INSTALLED or os.environ.get("ROLLOUT_RAW_OBSERVATION_OFFLOAD", "false").lower() != _ENABLED_VALUE:
         return
 
-    from lerobot.rollout.inference import factory as inference_factory
     from lerobot.rollout import context as rollout_context
+    from lerobot.rollout.inference import factory as inference_factory
     from lerobot.rollout.strategies import core as strategy_core
 
     original_create_inference_engine = inference_factory.create_inference_engine
@@ -221,12 +218,7 @@ def validate_raw_observation_offload(policy_path: str, robot_type: str) -> None:
         device=config.device,
         robot_type=robot_type,
     )
-    engine.notify_observation(
-        {
-            name: value.numpy()
-            for name, value in observation.items()
-        }
-    )
+    engine.notify_observation({name: value.numpy() for name, value in observation.items()})
     engine.reset()
     action = engine.get_action(observation)
     engine.stop()

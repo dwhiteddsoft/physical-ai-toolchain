@@ -49,7 +49,8 @@ def gpu_inference(batch: int = 8, image_size: int = 32) -> dict:
 
     device = torch.device("cuda:0")
     result["device_name"] = str(torch.cuda.get_device_name(device))
-    result["compute_capability"] = "%d.%d" % torch.cuda.get_device_capability(device)
+    major, minor = torch.cuda.get_device_capability(device)
+    result["compute_capability"] = f"{major}.{minor}"
     result["cuda_runtime_version"] = str(torch.version.cuda) if torch.version.cuda else None
     result["total_memory_mib"] = int(torch.cuda.get_device_properties(device).total_memory / (1024 * 1024))
 

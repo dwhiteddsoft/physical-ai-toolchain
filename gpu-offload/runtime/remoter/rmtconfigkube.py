@@ -9,6 +9,7 @@ import yaml
 from . import rmtconfig
 from .k8sutils_compat import utils
 
+
 def create_client(config_file) -> client.CoreV1Api:
     if config_file:
         config.load_kube_config(config_file)
@@ -21,36 +22,45 @@ def create_client(config_file) -> client.CoreV1Api:
             config.load_incluster_config()
     return client.CoreV1Api()
 
+
 def get_pod_remoter_port(pod: client.V1Pod) -> str:
-    if pod.metadata and pod.metadata.labels and 'remoterPort' in pod.metadata.labels:
-        return pod.metadata.labels['remoterPort']
+    if pod.metadata and pod.metadata.labels and "remoterPort" in pod.metadata.labels:
+        return pod.metadata.labels["remoterPort"]
     # now check envvars for REMOTERPORT
     if pod.spec and pod.spec.containers:
         for container in pod.spec.containers:
             if container.env:
                 for envvar in container.env:
-                    if envvar.name == 'REMOTERPORT':
+                    if envvar.name == "REMOTERPORT":
                         return envvar.value
-    return '9000' # default port
+    return "9000"  # default port
 
-def get_pod_socket_path(pod: client.V1Pod) -> str|None:
+
+def get_pod_socket_path(pod: client.V1Pod) -> str | None:
     ret = None
-    if pod.metadata and pod.metadata.labels and 'remoterSock' in pod.metadata.labels:
-        ret = pod.metadata.labels['remoterSock']
+    if pod.metadata and pod.metadata.labels and "remoterSock" in pod.metadata.labels:
+        ret = pod.metadata.labels["remoterSock"]
     # now check envvars for REMOTERSOCK
     if pod.spec and pod.spec.containers:
         for container in pod.spec.containers:
             if container.env:
                 for envvar in container.env:
-                    if envvar.name == 'REMOTERSOCK':
+                    if envvar.name == "REMOTERSOCK":
                         ret = envvar.value
     # if ret is directory or does not end in .sock, assume it specifies directory and generate socket file name as remotersock/podname-poduid.sock
-    if (ret and (os.path.isdir(ret) or not ret.endswith(".sock")) and
-        pod.metadata and pod.metadata.namespace and pod.metadata.name and pod.metadata.uid):
+    if (
+        ret
+        and (os.path.isdir(ret) or not ret.endswith(".sock"))
+        and pod.metadata
+        and pod.metadata.namespace
+        and pod.metadata.name
+        and pod.metadata.uid
+    ):
         ret = utils.socketpath(ret, pod.metadata.namespace, pod.metadata.name, pod.metadata.uid)
     return ret
 
-def on_pod(event_type: str, pod: client.V1Pod, lock: threading.Lock, keys : dict, locations: dict, configfile: str):
+
+def on_pod(event_type: str, pod: client.V1Pod, lock: threading.Lock, keys: dict, locations: dict, configfile: str):
     add = False
     remove = False
     if event_type == "DELETED" or (pod.metadata and pod.metadata.deletion_timestamp is not None):
@@ -103,36 +113,47 @@ def on_pod(event_type: str, pod: client.V1Pod, lock: threading.Lock, keys : dict
         print("Updated config:", config)
         rmtconfig.update_config_file(configfile, config)
 
-def watch_pods(v1api: client.CoreV1Api, resource_version: str, namespace: str, on_pod, lock: threading.Lock,
-               keys : dict, locations: dict, configfile: str):
+
+def watch_pods(
+    v1api: client.CoreV1Api,
+    resource_version: str,
+    namespace: str,
+    on_pod,
+    lock: threading.Lock,
+    keys: dict,
+    locations: dict,
+    configfile: str,
+):
     while True:
         try:
             w = watch.Watch()
             if namespace:
-                for event in w.stream(v1api.list_namespaced_pod, namespace=namespace, resource_version=resource_version):
-                    pod = event['object']
-                    etype = event['type']
+                for event in w.stream(
+                    v1api.list_namespaced_pod, namespace=namespace, resource_version=resource_version
+                ):
+                    pod = event["object"]
+                    etype = event["type"]
                     on_pod(etype, pod, lock, keys, locations, configfile)
             else:
                 for event in w.stream(v1api.list_pod_for_all_namespaces, resource_version=resource_version):
-                    pod = event['object']
-                    etype = event['type']
+                    pod = event["object"]
+                    etype = event["type"]
                     on_pod(etype, pod, lock, keys, locations, configfile)
         except Exception as e:
             print(f"watch_pods exception: {e}\n{traceback.format_exc()}")
             pass
 
-def createconfig(keys : dict, locations : dict) -> dict:
+
+def createconfig(keys: dict, locations: dict) -> dict:
     config = {}
     for serverlabel, keyset in keys.items():
         for key in keyset:
-            config[key] = {
-                'locations': {}
-            }
+            config[key] = {"locations": {}}
             if locations.get(serverlabel):
                 for loc in locations[serverlabel]:
-                    config[key]['locations'][loc] = 1.0 / len(locations[serverlabel])
+                    config[key]["locations"][loc] = 1.0 / len(locations[serverlabel])
     return config
+
 
 def getparam(key, config, localconfig, default):
     ret = default
@@ -142,20 +163,22 @@ def getparam(key, config, localconfig, default):
         ret = localconfig[key]
     return ret
 
+
 def getdictparam(key, config, localconfig):
     ret = {}
-    #print(key, localconfig)
+    # print(key, localconfig)
     if key in config:
         ret = config[key]
     if localconfig and key in localconfig:
         ret.update(localconfig[key])
     return ret
 
+
 def isremotable(config, localconfig) -> bool:
     if getparam("remoteableserver", config, localconfig, False):
         return True
     remoteableon = getdictparam("remoteableon", config, localconfig)
-    #print(remoteableon)
+    # print(remoteableon)
     stage_name = os.environ.get("STAGE_NAME", "")
     print("Stage name:", stage_name)
     for loc, val in remoteableon.items():
@@ -163,71 +186,74 @@ def isremotable(config, localconfig) -> bool:
             return val
     return False
 
+
 # loc specifies stagename of remotelocation
 # SERVERLABEL and PERCLIENTSERVERLABEL of form "apprmt=<name>-remote-server"
 # if loc is client, then remove -remote-server-client suffix
 def getserverlabel(config, loc) -> str:
     # find if stage is perclient or not
     ret = None
-    perclientlabel = os.environ.get('PERCLIENTSERVERLABEL', '')
-    if perclientlabel == 'unknown':
+    perclientlabel = os.environ.get("PERCLIENTSERVERLABEL", "")
+    if perclientlabel == "unknown":
         # only for client pods generated by deployment -- for these use hostname to generate perclient label
-        podname = os.environ.get('HOSTNAME', 'unknownpod')
+        podname = os.environ.get("HOSTNAME", "unknownpod")
         perclientlabel = f"apprmt={podname}-remote-server"
     for stageobj in config.get("serverstages", []):
-        if stageobj['name'] == loc:
+        if stageobj["name"] == loc:
             if stageobj.get("perclient", False):
-                ret = f"{perclientlabel}-{loc}" # for perclient, use pod-specific serverlabel
+                ret = f"{perclientlabel}-{loc}"  # for perclient, use pod-specific serverlabel
             else:
-                ret = f"{os.environ['SERVERLABEL']}-{loc}" # for non-perclient, use common serverlabel which must exist
+                ret = f"{os.environ['SERVERLABEL']}-{loc}"  # for non-perclient, use common serverlabel which must exist
             break
     if ret:
         if loc == "client" and ret.endswith("-remote-server-client"):
-            ret = ret[:-len("-remote-server-client")]
+            ret = ret[: -len("-remote-server-client")]
         return ret
     raise ValueError(f"Location {loc} not found in serverstages")
 
+
 # serverlabel only written if remoteloc is specified
-def rewrite_taskconfig(taskconfig : str):
+def rewrite_taskconfig(taskconfig: str):
     defserverlabel = os.environ.get("SERVERLABEL", "remoteserver=true")
     isserver = os.environ.get("SERVER", "false").lower() in ["true", "1", "yes"]
-    with open(taskconfig, 'r') as f:
+    with open(taskconfig, "r") as f:
         cfg = yaml.safe_load(f)
 
     # rewrite following fields: remoteableserver, remoteoableon, remoteloc
     cfgnew = copy.deepcopy(cfg)
-    cfgnew.pop('remoteloc', None)
-    cfgnew.pop('remoteableserver', None)
-    cfgnew.pop('remoteableon', None)
+    cfgnew.pop("remoteloc", None)
+    cfgnew.pop("remoteableserver", None)
+    cfgnew.pop("remoteableon", None)
     for func in cfgnew.get("remotefuncs", []):
         for target_path, params in func.items():
             # functions are always remoteable
-            if 'remoteloc' in params:
-                serverlabel = getserverlabel(cfg, params['remoteloc'])
-                params['serverlabel'] = serverlabel
-                params.pop('remoteloc', None)
-            params.pop('remoteableserver', None)
-            params.pop('remoteableon', None)
+            if "remoteloc" in params:
+                serverlabel = getserverlabel(cfg, params["remoteloc"])
+                params["serverlabel"] = serverlabel
+                params.pop("remoteloc", None)
+            params.pop("remoteableserver", None)
+            params.pop("remoteableon", None)
     for cls in cfgnew.get("remoteclasses", []):
         for target_path, params in cls.items():
             # classes are remoteable based on config
-            if 'remoteloc' in params:
-                serverlabel = getserverlabel(cfg, params['remoteloc'])
-                params['serverlabel'] = serverlabel
-                params.pop('remoteloc', None)
+            if "remoteloc" in params:
+                serverlabel = getserverlabel(cfg, params["remoteloc"])
+                params["serverlabel"] = serverlabel
+                params.pop("remoteloc", None)
             if isserver:
                 remoteable = isremotable(cfg, params)
-                params['remoteableserver'] = remoteable
+                params["remoteableserver"] = remoteable
             else:
-                params.pop('remoteableserver', None)
-            params.pop('remoteableon', None)
+                params.pop("remoteableserver", None)
+            params.pop("remoteableon", None)
 
     # Generated state must be outside the read-only ConfigMap mount.
     newtaskconfig = "/tmp/remoter_rewritten.yaml"
-    with open(newtaskconfig, 'w') as f:
+    with open(newtaskconfig, "w") as f:
         yaml.safe_dump(cfgnew, f)
 
     return cfgnew, newtaskconfig
+
 
 def get_keys(cfg):
     # default server label
@@ -255,10 +281,12 @@ def get_keys(cfg):
                 keys[serverlabel].add(target_path)
     return keys
 
+
 initdone = False
 initlock = threading.Lock()
 g_cfg = {}
 g_remoteconfig = ""
+
 
 # keys is a dictionary of serverlabel -> set of (funcnames, classkeys) which utilize the serverlabel
 def rmtconfigkube_init(taskconfig, locconfigfile) -> tuple[dict, str]:
@@ -269,7 +297,7 @@ def rmtconfigkube_init(taskconfig, locconfigfile) -> tuple[dict, str]:
         initdone = True
 
     # read configfile
-    with open(taskconfig, 'r') as f:
+    with open(taskconfig, "r") as f:
         cfg = yaml.safe_load(f)
 
     cfg, newremoteconfig = rewrite_taskconfig(taskconfig)
@@ -304,10 +332,10 @@ def rmtconfigkube_init(taskconfig, locconfigfile) -> tuple[dict, str]:
     rv = pods.metadata.resource_version if pods.metadata else None
 
     # watch pods which have any of the serverlabels
-    watch_thread = threading.Thread(target=watch_pods, args=(v1api, rv, namespace, on_pod, lock,
-                                                             keys, locations, locconfigfile), daemon=True)
+    watch_thread = threading.Thread(
+        target=watch_pods, args=(v1api, rv, namespace, on_pod, lock, keys, locations, locconfigfile), daemon=True
+    )
     watch_thread.start()
-
 
     print("rmtconfigkube initialized")
     return cfg, newremoteconfig

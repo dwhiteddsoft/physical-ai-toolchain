@@ -260,7 +260,6 @@ This toolchain builds upon:
 - Built with [HVE Core](https://github.com/microsoft/hve-core)
 - [Offload or Overload: A Platform Measurement Study of Mobile Robotic Manipulation Workloads](https://arxiv.org/abs/2603.18284)
 
-
 ## 🤖 Responsible AI
 
 Microsoft encourages customers to review its Responsible AI Standard when developing AI-enabled systems to ensure ethical, safe, and inclusive AI practices. Learn more at [Microsoft's Responsible AI](https://www.microsoft.com/ai/responsible-ai).

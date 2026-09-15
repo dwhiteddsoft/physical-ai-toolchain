@@ -716,12 +716,7 @@ def build_desired_server_deployments(
 ) -> dict[str, dict[str, Any] | None]:
     desired: dict[str, dict[str, Any] | None] = {}
     metadata, spec, xaviercfg = get_metadata_spec(obj, strict=True)
-    if (
-        metadata is not None
-        and spec is not None
-        and xaviercfg is not None
-        and not _is_parent_labeled_pod(metadata)
-    ):
+    if metadata is not None and spec is not None and xaviercfg is not None and not _is_parent_labeled_pod(metadata):
         xavierconfig = merge_configmap_config(core_api, xaviercfg, metadata.get("namespace", "default"))
         for stageobj in xavierconfig.get("serverstages", []):
             if stageobj.get("perclient", False) and obj.get("kind") != "Pod":

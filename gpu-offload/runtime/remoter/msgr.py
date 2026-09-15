@@ -7,30 +7,38 @@ from .msgsock import Messenger
 from typing import Callable
 import socket
 
-def CreateMessageServer(ep: str, initfn: Callable[[MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None,
-                        handlefn: Callable[[bytes, MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None,
-                        closefn: Callable[[MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None) -> MessageServerTCP|MessageServerUDP|MessageServerUnix:
+
+def CreateMessageServer(
+    ep: str,
+    initfn: Callable[[MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+    handlefn: Callable[[bytes, MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+    closefn: Callable[[MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+) -> MessageServerTCP | MessageServerUDP | MessageServerUnix:
     protocol, addr = ep.split("://", 1)
     if protocol == "tcp":
         host, port = addr.split(":", 1)
-        if host == '':
-            host = '0.0.0.0' # listen on all interfaces if host is empty
+        if host == "":
+            host = "0.0.0.0"  # listen on all interfaces if host is empty
         return MessageServerTCP(host, int(port), initfn, handlefn, closefn)
     elif protocol == "udp":
         host, port = addr.split(":", 1)
-        if host == '':
-            host = '0.0.0.0'
+        if host == "":
+            host = "0.0.0.0"
         return MessageServerUDP(host, int(port), initfn, handlefn, closefn)
     elif protocol == "unix":
         return MessageServerUnix(addr, initfn, handlefn, closefn)
 
-def CreateMessenger(ep: str, sock: socket.socket|None = None,
-                    localsockpath: str|None = None,
-                    isserver : bool = False,
-                    initfn: Callable[[MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None,
-                    handlefn: Callable[[bytes, MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None,
-                    closefn: Callable[[MessengerTCP|MessengerUDP|MessengerUnix, str], None]|None = None,
-                    startrecvthread: bool = False) -> Messenger:
+
+def CreateMessenger(
+    ep: str,
+    sock: socket.socket | None = None,
+    localsockpath: str | None = None,
+    isserver: bool = False,
+    initfn: Callable[[MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+    handlefn: Callable[[bytes, MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+    closefn: Callable[[MessengerTCP | MessengerUDP | MessengerUnix, str], None] | None = None,
+    startrecvthread: bool = False,
+) -> Messenger:
     protocol, _ = ep.split("://", 1)
     if protocol == "tcp":
         return MessengerTCP(sock, ep, initfn, handlefn, closefn, startrecvthread)

@@ -192,24 +192,24 @@ run = "examples/ur10e-single/scripts/teardown.sh"
 [tasks."f-10-setup"]
 description = "Run the full setup sequence for the resolved platform"
 depends = [
-  "a-detect",
-  "b-host-10-preflight",
-  "c-cluster-20-create",
-  "c-cluster-21-check",
-  "c-cluster-30-gpu-enable",
-  "c-cluster-31-gpu-check",
-  "d-offload-40-build-images",
-  "d-offload-41-load-images",
-  "d-offload-43-install-controller",
-  "d-offload-50-deploy",
+    "a-detect",
+    "b-host-10-preflight",
+    "c-cluster-20-create",
+    "c-cluster-21-check",
+    "c-cluster-30-gpu-enable",
+    "c-cluster-31-gpu-check",
+    "d-offload-40-build-images",
+    "d-offload-41-load-images",
+    "d-offload-43-install-controller",
+    "d-offload-50-deploy",
 ]
 
 [tasks."f-20-verify"]
 description = "Run every check for the resolved platform"
 depends = [
-  "d-offload-51-check-execution",
-  "d-offload-61-check-gpu-allocation",
-  "d-offload-62-check-gpu-model",
+    "d-offload-51-check-execution",
+    "d-offload-61-check-gpu-allocation",
+    "d-offload-62-check-gpu-model",
 ]
 
 [tasks."f-30-teardown"]

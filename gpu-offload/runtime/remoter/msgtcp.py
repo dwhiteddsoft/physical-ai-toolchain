@@ -65,9 +65,9 @@ class MessengerTCP(Messenger):
                 self.state = MessengerTCP.GetData
             elif self.state == MessengerTCP.GetData:
                 if len(self.curmsg) < self.msglen:
-                    return True, False, None # not enough data to get full message yet
-                msg = bytes(self.curmsg[:self.msglen])
-                del self.curmsg[:self.msglen]
+                    return True, False, None  # not enough data to get full message yet
+                msg = bytes(self.curmsg[: self.msglen])
+                del self.curmsg[: self.msglen]
                 self.state = MessengerTCP.GetLen
                 return True, True, msg
             else:

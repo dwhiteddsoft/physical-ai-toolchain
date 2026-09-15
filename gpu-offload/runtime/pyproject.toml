@@ -8,20 +8,20 @@ version = "0.1.0"
 description = "Xavier remoter runtime with safe MessagePack wire codec"
 requires-python = ">=3.12"
 dependencies = [
-  "cryptography==46.0.3",
-  "filelock==3.20.0",
-  "flask==3.1.1",
-  "kubernetes==34.1.0",
-  "msgpack==1.1.1",
-  "pyyaml==6.0.2",
-  "requests==2.32.5",
-  "termcolor==3.2.0",
-  "watchfiles==1.1.1",
+    "cryptography==46.0.3",
+    "filelock==3.20.0",
+    "flask==3.1.1",
+    "kubernetes==34.1.0",
+    "msgpack==1.1.1",
+    "pyyaml==6.0.2",
+    "requests==2.32.5",
+    "termcolor==3.2.0",
+    "watchfiles==1.1.1",
 ]
 
 [project.optional-dependencies]
 test = [
-  "pytest==8.4.1",
+    "pytest==8.4.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -30,3 +30,8 @@ packages = ["remoter"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# remoter is vendored from microsoft/xavier; remaining findings are upstream style
+# choices (unused locals, lambda assignment, == False) left unrefactored.
+"remoter/*.py" = ["E712", "E731", "F841"]

@@ -380,9 +380,7 @@ def _run_headless(session: OffloadSession, args: argparse.Namespace) -> int:
             frame = build_dataset_frame(observation_features, robot.get_observation(), prefix="observation")
             # Convert on the CPU: the codec has no NumPy adapter, and this
             # container holds no GPU to convert onto.
-            prepared = prepare_observation_for_inference(
-                frame, torch.device("cpu"), args.task, robot.robot_type
-            )
+            prepared = prepare_observation_for_inference(frame, torch.device("cpu"), args.task, robot.robot_type)
             action_values = session.get_action(prepared)
             action = make_robot_action(action_values, action_features)
             robot.send_action(action)

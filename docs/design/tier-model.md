@@ -1,4 +1,10 @@
-# Tier Model — Canonical Reference
+---
+title: "Tier Model — Canonical Reference"
+description: Canonical reference for tier IDs, stage names, boundaries, and vocabulary of the T0-T5 tiered architecture
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: reference
+---
 
 - **Status:** Canonical (single source of truth)
 - **Operationalizes:** [Tiered Architecture Proposal](tiered-architecture-proposal.md)

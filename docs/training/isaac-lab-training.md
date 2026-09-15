@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Isaac Lab Training
 description: Reinforcement learning training with SKRL and RSL-RL backends on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-15
 ms.topic: how-to
 keywords:
   - isaac lab

@@ -1,4 +1,10 @@
-# Recipes
+---
+title: "Recipes"
+description: Step-by-step guides organized by infrastructure tier and by topic
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: overview
+---
 
 Step-by-step guides that take you from a standing start to a working result. Each recipe is self-contained with prerequisites, runnable commands, and verification steps.
 

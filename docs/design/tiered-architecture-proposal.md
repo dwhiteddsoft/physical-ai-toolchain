@@ -1,4 +1,10 @@
-# Physical AI Toolchain — Tiered Architecture Proposal
+---
+title: "Physical AI Toolchain — Tiered Architecture Proposal"
+description: Adopted architecture decision framing the Physical AI Toolchain around the T0-T5 adoption tiers
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: concept
+---
 
 - **Date:** June 9th, 2026
 - **Author:** David White

@@ -1,10 +1,10 @@
 ---
+title: "AML → OSMO Proxy"
+description: Run OSMO workflows from Azure Machine Learning with submission, monitoring, and metric logging
 author: Edge AI Team
 ms.date: 2026-07-16
 ms.topic: reference
 ---
-
-# AML → OSMO Proxy
 
 Run any OSMO workflow from Azure Machine Learning — submit, monitor, and log metrics without modifying the workflow YAML.
 

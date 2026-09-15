@@ -1,4 +1,10 @@
-# T0 — Dev: The Local Training Lifecycle Loop
+---
+title: "T0 — Dev: The Local Training Lifecycle Loop"
+description: Run the full capture, curate, train, validate, and run loop on one laptop and one robot with zero cloud
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: tutorial
+---
 
 Walk the full training lifecycle loop, capture, curate, train, validate, and run on the robot, on **one laptop
 and one robot**, with **zero cloud** and **no required Kubernetes**. The baseline steps run as plain local

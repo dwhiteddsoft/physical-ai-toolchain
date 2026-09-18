@@ -11,7 +11,7 @@ helm version
 podman --version
 if [ "$GPU_OFFLOAD_RUNTIME" = "kind" ]; then
   kind version
-  podman info --format '{{ "{{" }}.Host.Security.Rootless{{ "}}" }} {{ "{{" }}.Host.OCIRuntime.Name{{ "}}" }}'
+  podman info --format '{{.Host.Security.Rootless}} {{.Host.OCIRuntime.Name}}'
 fi
 helm template gpu-offload helm/gpu-offload \
   --namespace gpu-offload \

@@ -7,10 +7,12 @@ eval "$(scripts/detect-platform.sh --export)"
 
 registry_host="${GPU_OFFLOAD_REGISTRY_HOST:-localhost:5000}"
 
-# Prefer the host-local registry: it needs no privileges. Importing an image
-# straight into containerd requires sudo, so that path is only a fallback for
-# hosts where the registry is not running.
-if curl --silent --fail --max-time 2 "http://$registry_host/v2/" > /dev/null 2>&1; then
+# Prefer the host-local registry: it needs no privileges. Only k3s runs on the
+# host and gets a containerd mirror pointed at it (registry-up.sh); a kind node
+# runs in its own container and cannot reach the host's loopback address, so it
+# always falls back to an image already loaded into the node (see
+# load-images.sh) and referenced without a registry host.
+if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ] && curl --silent --fail --max-time 2 "http://$registry_host/v2/" > /dev/null 2>&1; then
   image_registry="$registry_host"
   pull_policy="IfNotPresent"
 else

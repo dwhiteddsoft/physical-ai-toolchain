@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import threading
+import types
 
 import pytest
 from kubernetes import client
@@ -69,6 +70,19 @@ class _FakeAppsApi:
     def delete_namespaced_deployment(self, name, namespace):
         self.deployments.pop((namespace, name), None)
         self.actions.append(("delete", namespace, name))
+
+    def list_namespaced_deployment(self, namespace, label_selector=None):
+        key_filter, _, value_filter = (label_selector or "").partition("=")
+        items = []
+        for (ns, name), body in self.deployments.items():
+            if ns != namespace:
+                continue
+            if label_selector:
+                labels = body.get("metadata", {}).get("labels", {}) or {}
+                if labels.get(key_filter) != value_filter:
+                    continue
+            items.append(types.SimpleNamespace(metadata=types.SimpleNamespace(name=name)))
+        return types.SimpleNamespace(items=items)
 
 
 class _FakeBatchApi:
@@ -350,13 +364,51 @@ def test_validate_xavier_config_rejects_privileged_root_settings():
         )
 
 
+def test_validate_xavier_config_rejects_escalation_capabilities_and_unconfined_seccomp():
+    mod = _load_mutate_module()
+
+    with pytest.raises(mod.XavierConfigError, match="allowPrivilegeEscalation=true"):
+        mod.validate_xavier_config(
+            {"remoteablecm": "cm", "securityContext": {"allowPrivilegeEscalation": True}},
+            source="annotation",
+            require_remoteablecm=True,
+        )
+
+    with pytest.raises(mod.XavierConfigError, match=r"capabilities\.add"):
+        mod.validate_xavier_config(
+            {"remoteablecm": "cm", "securityContext": {"capabilities": {"add": ["SYS_ADMIN"]}}},
+            source="annotation",
+            require_remoteablecm=True,
+        )
+
+    with pytest.raises(mod.XavierConfigError, match=r"seccompProfile\.type=Unconfined"):
+        mod.validate_xavier_config(
+            {"remoteablecm": "cm", "securityContext": {"seccompProfile": {"type": "Unconfined"}}},
+            source="annotation",
+            require_remoteablecm=True,
+        )
+
+    # a benign securityContext is still accepted
+    normalized = mod.validate_xavier_config(
+        {
+            "remoteablecm": "cm",
+            "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+        },
+        source="annotation",
+        require_remoteablecm=True,
+    )
+    assert normalized["securityContext"]["capabilities"]["drop"] == ["ALL"]
+
+
 def test_build_desired_server_deployments_merges_supported_schema_fields():
     mod = _load_mutate_module()
     pod = _base_workload(kind="Pod")
+    pod["metadata"]["labels"] = {"xavier": "true"}
     pod["spec"]["containers"][0].update(
         {
             "env": [
                 {"name": "XAVIER_CONTAINER", "value": "true"},
+                {"name": "REMOTERPORT", "value": "30001"},
                 {"name": "KEEP_ME", "value": "from-client"},
                 {"name": "FROM_FIELD", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
             ],
@@ -449,6 +501,28 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
     assert stage_deployment["spec"]["template"]["spec"]["containers"][0]["image"] == "registry/perclient:2"
     assert stage_deployment["spec"]["template"]["spec"]["containers"][0]["securityContext"]["runAsUser"] == 1001
     assert stage_deployment["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]["cpu"] == "500m"
+
+
+@pytest.mark.parametrize(
+    "labels,env",
+    [
+        pytest.param({}, [{"name": "REMOTERPORT", "value": "30001"}], id="missing-label"),
+        pytest.param({"xavier": "true"}, [], id="missing-remoterport-env"),
+        pytest.param({}, [], id="missing-both"),
+    ],
+)
+def test_build_desired_server_deployments_requires_all_opt_in_signals(labels, env):
+    mod = _load_mutate_module()
+    pod = _base_workload(kind="Pod")
+    pod["metadata"]["labels"] = labels
+    pod["spec"]["containers"][0]["env"] = env
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    apps_api = _FakeAppsApi()
+    batch_api = _FakeBatchApi()
+
+    desired = mod.build_desired_server_deployments(pod, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    assert desired == {}
 
 
 def test_build_desired_server_deployments_uses_parent_config_for_perclient_pods():
@@ -548,6 +622,34 @@ def test_reconcile_named_server_deployment_creates_patches_and_deletes():
         ("patch", "default", "client-remote-server"),
         ("delete", "default", "client-remote-server"),
     ]
+
+
+def test_reconcile_object_deletes_server_deployment_for_removed_stage():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+    ]
+    # a server Deployment left over from a stage that no longer exists in serverstages
+    stale_name = "client-remote-server-oldstage"
+    apps_api = _FakeAppsApi(
+        deployments={
+            ("default", stale_name): {
+                "metadata": {"name": stale_name, "namespace": "default", "labels": {"xavierdeployment": "true"}},
+                "spec": {},
+            }
+        }
+    )
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    batch_api = _FakeBatchApi()
+
+    outcomes = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    assert outcomes["client-remote-server"] == "created"
+    assert outcomes[stale_name] == "deleted"
+    assert ("default", stale_name) not in apps_api.deployments
 
 
 def test_forbidden_mutations_are_not_applied():

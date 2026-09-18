@@ -3,8 +3,9 @@ image:
   tag: "0.6.1"
   pullPolicy: Never
 
-runtimeClass:
-  name: nvidia
+# Leave runtimeClass unset here: the documented local k3s setup makes NVIDIA the
+# containerd default rather than a named RuntimeClass (see values.yaml). Only set
+# runtimeClass.name if your cluster actually provides a RuntimeClass of that name.
 
 job:
   suspend: true

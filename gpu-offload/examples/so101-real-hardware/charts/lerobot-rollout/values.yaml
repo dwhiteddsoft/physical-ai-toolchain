@@ -3,8 +3,14 @@ image:
   tag: "0.6.1"
   pullPolicy: IfNotPresent
 
+# Empty by default: the documented local k3s setup (configure-k3s-nvidia.sh) makes
+# the NVIDIA container runtime the containerd default rather than creating a named
+# RuntimeClass object, so setting a name here without create:true (or an
+# externally-provisioned RuntimeClass of that name) makes the Job fail admission
+# with "RuntimeClass ... not found". Set name (and create:true, or provision the
+# class yourself) only if your cluster actually has that RuntimeClass.
 runtimeClass:
-  name: nvidia
+  name: ""
   create: false
   handler: nvidia
 
@@ -70,6 +76,10 @@ offload:
   server:
     replicas: 1
     nodeSelector: {}
-    resources: {}
+    # A GPU-offloaded policy server needs an explicit nvidia.com/gpu request; without
+    # one the generated server Deployment can schedule onto a CPU-only node.
+    resources:
+      limits:
+        nvidia.com/gpu: 1
   remoteClass: lerobot.policies.act.modeling_act/ACTPolicy
   loadFunction: lerobot.rollout.context//_load_pretrained_policy

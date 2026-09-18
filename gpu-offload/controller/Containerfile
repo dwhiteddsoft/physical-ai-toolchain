@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Install Python deps only (no apt-get, no runtime installs)
-RUN pip install --no-cache-dir kubernetes==34.1.0 PyYAML==6.0.2
+RUN pip install --no-cache-dir kubernetes==35.0.0 PyYAML==6.0.2
 
 # Copy controller code
 COPY . /app

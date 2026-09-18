@@ -141,6 +141,14 @@ def _validate_security_context(value: Any, *, field: str) -> dict[str, Any]:
         raise XavierConfigError(f"{field}.runAsUser=0 is not supported")
     if normalized.get("runAsNonRoot") is False:
         raise XavierConfigError(f"{field}.runAsNonRoot=false is not supported")
+    if normalized.get("allowPrivilegeEscalation") is True:
+        raise XavierConfigError(f"{field}.allowPrivilegeEscalation=true is not supported")
+    capabilities = normalized.get("capabilities")
+    if isinstance(capabilities, dict) and capabilities.get("add"):
+        raise XavierConfigError(f"{field}.capabilities.add is not supported")
+    seccomp_profile = normalized.get("seccompProfile")
+    if isinstance(seccomp_profile, dict) and seccomp_profile.get("type") == "Unconfined":
+        raise XavierConfigError(f"{field}.seccompProfile.type=Unconfined is not supported")
     return normalized
 
 
@@ -363,6 +371,28 @@ def _is_parent_labeled_pod(metadata: dict[str, Any]) -> bool:
 def _is_opted_root_workload(metadata: dict[str, Any]) -> bool:
     annotations = metadata.get("annotations") or {}
     return XAVIER_CONFIG_ANNOTATION in annotations
+
+
+def _has_xavier_label(metadata: dict[str, Any]) -> bool:
+    labels = metadata.get("labels") or {}
+    return labels.get(XAVIER_LABEL) in ("true", "True", "TRUE", "1")
+
+
+def _has_remoterport_env(spec: dict[str, Any]) -> bool:
+    return any(get_env_var(container, "REMOTERPORT") is not None for container in _all_containers(spec))
+
+
+def _is_fully_opted_root_workload(metadata: dict[str, Any], spec: dict[str, Any]) -> bool:
+    """Require all three opt-in signals from the contract (annotation, label, REMOTERPORT).
+
+    The admission webhook is only ever invoked for labeled objects because the
+    MutatingWebhookConfiguration's objectSelector filters CREATE requests by the
+    `xavier` label at the Kubernetes API server -- so `_is_opted_root_workload`
+    (annotation only) is sufficient there. Reconciliation is a separate watch loop
+    with no such selector, so it must check all three signals itself before
+    creating a server Deployment for an object.
+    """
+    return _is_opted_root_workload(metadata) and _has_xavier_label(metadata) and _has_remoterport_env(spec)
 
 
 def _has_xavier_env(container: dict[str, Any]) -> bool:
@@ -716,7 +746,13 @@ def build_desired_server_deployments(
 ) -> dict[str, dict[str, Any] | None]:
     desired: dict[str, dict[str, Any] | None] = {}
     metadata, spec, xaviercfg = get_metadata_spec(obj, strict=True)
-    if metadata is not None and spec is not None and xaviercfg is not None and not _is_parent_labeled_pod(metadata):
+    if (
+        metadata is not None
+        and spec is not None
+        and xaviercfg is not None
+        and not _is_parent_labeled_pod(metadata)
+        and _is_fully_opted_root_workload(metadata, spec)
+    ):
         xavierconfig = merge_configmap_config(core_api, xaviercfg, metadata.get("namespace", "default"))
         for stageobj in xavierconfig.get("serverstages", []):
             if stageobj.get("perclient", False) and obj.get("kind") != "Pod":
@@ -776,6 +812,33 @@ def reconcile_named_server_deployment(
     return "patched"
 
 
+def _orphaned_server_deployment_names(
+    apps_api: client.AppsV1Api,
+    *,
+    namespace: str,
+    parent_name: str,
+    desired_names: set[str],
+) -> list[str]:
+    """Names of previously-created server Deployments for `parent_name` that are no
+    longer in `desired_names` -- e.g. because a stage was renamed or removed from
+    serverstages. Without this, reconcile_object only ever touches the current
+    desired set and an old server Deployment (and its GPU allocation) is never
+    cleaned up while the parent workload still exists.
+    """
+    if not parent_name:
+        return []
+    prefix = f"{parent_name}-remote-server"
+    existing = apps_api.list_namespaced_deployment(
+        namespace=namespace,
+        label_selector=f"{XAVIER_DEPLOYMENT_LABEL}=true",
+    )
+    return [
+        item.metadata.name
+        for item in existing.items
+        if item.metadata.name.startswith(prefix) and item.metadata.name not in desired_names
+    ]
+
+
 def reconcile_object(
     obj: dict[str, Any],
     *,
@@ -799,6 +862,19 @@ def reconcile_object(
             namespace=namespace,
             deployment_name=deployment_name,
             desired_spec=desired_spec,
+        )
+    orphan_names = _orphaned_server_deployment_names(
+        apps_api,
+        namespace=namespace,
+        parent_name=obj.get("metadata", {}).get("name", ""),
+        desired_names=set(desired_deployments),
+    )
+    for deployment_name in orphan_names:
+        outcomes[deployment_name] = reconcile_named_server_deployment(
+            apps_api,
+            namespace=namespace,
+            deployment_name=deployment_name,
+            desired_spec=None,
         )
     return outcomes
 

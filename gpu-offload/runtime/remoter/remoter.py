@@ -285,8 +285,6 @@ def getdictparam(key: str, funckey: str, actclasskey: str) -> dict:
 
 # ==================
 
-global imported_modules
-global imported_functions
 imported_modules: dict[str, ModuleType] = {}
 imported_functions: dict[str, Callable] = {}
 

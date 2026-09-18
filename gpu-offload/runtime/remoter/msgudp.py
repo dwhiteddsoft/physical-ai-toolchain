@@ -53,7 +53,9 @@ def initUDP():
     global singlesock
     if usesingleudpsock:  # use single socket for client-side messengers, set to False to create separate socket for each messenger (not needed)
         singlesock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # bind to random free port on localhost for receiving responses, since we will use connect to set default destination for outgoing messages, we can receive responses from server without knowing server's IP address in advance
+        # bind to a random free port on all interfaces (not just loopback -- the server may be on a remote host)
+        # for receiving responses; each MessengerUDP later calls connect() to set its default send destination,
+        # and _networkrecv() checks the sender address against the expected server address before accepting data
         singlesock.bind(("", 0))
         logger.info(f"Created single UDP socket for client-side messengers: {singlesock.getsockname()}", color="cyan")
         threading.Thread(target=recvUDPThread, args=(singlesock,), daemon=True).start()
@@ -104,7 +106,7 @@ class MessengerUDP(Messenger):
         self.ep = ep
         self.messageindex = 0
         self.maxmessageindex = -1
-        self.lock = threading.Lock()  # lock to protect messageindex
+        self.idxlock = threading.Lock()  # protects messageindex/messages/tokens (distinct from base class's self.lock)
         self.messages = {}  # messageindex to list of chunks received so far
         self.lastcleanup = time.time()
         self.lasttokenfill = time.time()
@@ -124,7 +126,7 @@ class MessengerUDP(Messenger):
             threading.Thread(target=self.recvthread, daemon=True).start()
 
     def _tokenfill(self, curtime):
-        with self.lock:
+        with self.idxlock:
             # fill tokens based on time elapsed since last fill
             elapsed = curtime - self.lasttokenfill
             self.tokens = min(tokenbucket, self.tokens + elapsed * bitrate)
@@ -159,7 +161,7 @@ class MessengerUDP(Messenger):
         if curtime - self.lastcleanup < 10:  # only cleanup every 10 seconds
             return
         # cleanup old messages that have not been fully received to prevent memory leak
-        with self.lock:
+        with self.idxlock:
             if curtime - self.lastcleanup < 10:  # check again after acquiring lock
                 return
             self.lastcleanup = curtime
@@ -191,7 +193,7 @@ class MessengerUDP(Messenger):
         )
         self.maxmessageindex = max(self.maxmessageindex, messageindex)
         chunkdata = self.curdata[HEADER_SIZE:]
-        with self.lock:
+        with self.idxlock:
             if messageindex not in self.messages:
                 self.messages[messageindex] = {"time": time.time(), "data": [None] * totalchunks}
             self.messages[messageindex]["data"][chunkindex] = chunkdata
@@ -225,7 +227,7 @@ class MessengerUDP(Messenger):
 
     def _sendmessage(self, message: list[bytes]) -> int | None:
         # break up into chunks of 1200 bytes and send each chunk with a header of message index and total messages
-        with self.lock:
+        with self.idxlock:
             messageindex = self.messageindex
             self.messageindex += 1
         totallen = sum(len(m) for m in message)
@@ -245,7 +247,7 @@ class MessengerUDP(Messenger):
             totalchunklen = sum(len(m) for m in sendmsgs)
             while self.tokens < totalchunklen:
                 time.sleep(0.001)  # wait for tokens to be refilled, can be adjusted as needed
-            with self.lock:
+            with self.idxlock:
                 self.tokens -= totalchunklen * 8  # convert bytes to bits for token calculation
             logger.debug(
                 f"Sending chunk {chunkindex + 1}/{numchunks} of message {messageindex} to {self.ep} of length {totalchunklen}"

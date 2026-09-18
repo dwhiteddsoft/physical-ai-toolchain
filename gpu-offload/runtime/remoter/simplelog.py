@@ -199,10 +199,9 @@ logger: SimpleLog = None
 
 def initlog(filename, loglevel=logging.DEBUG, printlevel=logging.INFO):
     global logger
-    if logger is None or True:
-        logger = SimpleLog(filename, loglevel, printlevel)
-    else:
-        logger.info(f"Logger already initialized - {filename} output goes to - {logger.filename}")
+    # each caller gets its own SimpleLog instance (distinct log file); this intentionally does not
+    # reuse an existing instance even if one was already created by another module
+    logger = SimpleLog(filename, loglevel, printlevel)
     return logger
 
 

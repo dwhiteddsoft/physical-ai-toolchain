@@ -296,10 +296,6 @@ def rmtconfigkube_init(taskconfig, locconfigfile) -> tuple[dict, str]:
             return g_cfg, g_remoteconfig
         initdone = True
 
-    # read configfile
-    with open(taskconfig, "r") as f:
-        cfg = yaml.safe_load(f)
-
     cfg, newremoteconfig = rewrite_taskconfig(taskconfig)
     g_cfg = cfg
     g_remoteconfig = newremoteconfig

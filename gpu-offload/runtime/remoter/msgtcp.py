@@ -39,8 +39,6 @@ class MessengerTCP(Messenger):
         super().__init__(ep, initfn, handlefn, closefn)
         self.state = MessengerTCP.GetLen
         self.curmsg = bytearray()
-        self.ep = ep
-        super().__init__(ep, initfn, handlefn, closefn)
         if startrecvthread:
             threading.Thread(target=self.recvthread, daemon=True).start()
 

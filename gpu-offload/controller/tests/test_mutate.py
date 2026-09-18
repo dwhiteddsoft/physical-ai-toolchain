@@ -437,6 +437,9 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
                 "remote.yaml": (
                     "serverimage: registry/default:1\n"
                     "serverreplicas: 2\n"
+                    "remoteableenv:\n"
+                    "  - KEEP_ME\n"
+                    "  - FROM_FIELD\n"
                     "nodeSelector:\n"
                     "  accelerator: gpu\n"
                     "securityContext:\n"
@@ -731,6 +734,85 @@ def test_reconcile_object_does_not_delete_unowned_deployment_with_same_name_pref
 
     assert outcomes == {}
     assert ("default", active_name) in apps_api.deployments
+
+
+def test_create_server_deployment_spec_excludes_secret_bearing_volumes():
+    mod = _load_mutate_module()
+    pod = _base_workload(kind="Pod")
+    pod["metadata"]["labels"] = {"xavier": "true"}
+    pod["spec"]["containers"][0].update(
+        {
+            "env": [{"name": "XAVIER_CONTAINER", "value": "true"}, {"name": "REMOTERPORT", "value": "30001"}],
+            "volumeMounts": [
+                {"name": "creds", "mountPath": "/creds"},
+                {"name": "proj-creds", "mountPath": "/proj-creds"},
+                {"name": "config", "mountPath": "/config"},
+            ],
+        }
+    )
+    pod["spec"]["volumes"] = [
+        {"name": "creds", "secret": {"secretName": "db-password"}},
+        {
+            "name": "proj-creds",
+            "projected": {"sources": [{"secret": {"name": "db-password"}}, {"downwardAPI": {"items": []}}]},
+        },
+        {"name": "config", "configMap": {"name": "app-config"}},
+    ]
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    apps_api = _FakeAppsApi()
+    batch_api = _FakeBatchApi()
+
+    desired = mod.build_desired_server_deployments(pod, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    server_spec = desired["client-remote-server"]["spec"]["template"]["spec"]
+    volume_names = {volume["name"] for volume in server_spec.get("volumes", [])}
+    mount_names = {mount["name"] for mount in server_spec["containers"][0].get("volumeMounts", [])}
+    assert volume_names == {"config"}
+    assert mount_names == {"config"}
+
+
+def test_create_server_deployment_spec_only_forwards_allow_listed_env():
+    mod = _load_mutate_module()
+    pod = _base_workload(kind="Pod")
+    pod["metadata"]["labels"] = {"xavier": "true"}
+    pod["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+        {"name": "API_TOKEN", "value": "super-secret"},
+        {"name": "SAFE_VALUE", "value": "ok-to-forward"},
+        {"name": "FROM_SECRET", "valueFrom": {"secretKeyRef": {"name": "db", "key": "password"}}},
+    ]
+    core_api = _FakeCoreApi(
+        {
+            ("default", "client-cm"): {
+                "remote.yaml": "\n".join(["serverstages:", '  - name: ""', "remoteableenv:", "  - SAFE_VALUE", ""])
+            }
+        }
+    )
+    apps_api = _FakeAppsApi()
+    batch_api = _FakeBatchApi()
+
+    desired = mod.build_desired_server_deployments(pod, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    env_names = {
+        env["name"] for env in desired["client-remote-server"]["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert "SAFE_VALUE" in env_names
+    assert "API_TOKEN" not in env_names
+    assert "FROM_SECRET" not in env_names
+
+
+def test_deployment_name_truncates_and_hashes_when_too_long():
+    mod = _load_mutate_module()
+    metadata = {"name": "a" * 80}
+
+    name = mod._deployment_name(metadata, "stage-one")
+
+    assert len(name) <= 63
+    # deterministic: same inputs produce the same bounded name
+    assert name == mod._deployment_name(metadata, "stage-one")
+    # a different stage for the same long base name produces a different result
+    assert name != mod._deployment_name(metadata, "stage-two")
 
 
 def test_forbidden_mutations_are_not_applied():

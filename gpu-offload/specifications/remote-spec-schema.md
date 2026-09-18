@@ -142,6 +142,7 @@ not be relied upon in new code.
 | `nodeSelector`       | map     | Implemented | Node selection for server pods            |
 | `securityContext`    | object  | Implemented | Validated security context for containers |
 | `env`                | list    | Implemented | Environment variables for containers      |
+| `remoteableenv`      | list    | Implemented | Client env var names allowed onto server  |
 | `noserverdeployment` | boolean | Implemented | Skip server deployment creation           |
 | `remoteablecm`       | string  | Implemented | ConfigMap name (required)                 |
 | `remoteableconts`    | list    | Implemented | Container names to mutate (optional)      |

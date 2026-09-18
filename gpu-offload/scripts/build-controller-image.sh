@@ -5,13 +5,16 @@ set -o errexit -o nounset
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-build_args=""
+secret_args=()
 if [ -n "${PIP_INDEX_URL:-}" ]; then
-  build_args="--build-arg PIP_INDEX_URL=$PIP_INDEX_URL"
+  # passed as a BuildKit secret (read from this shell's env by podman itself),
+  # never as a build arg, so a credential embedded in it never lands in image
+  # history
+  # shellcheck disable=SC2054  # one --secret value, not separate array elements
+  secret_args=(--secret id=PIP_INDEX_URL,env=PIP_INDEX_URL)
 fi
 
-# shellcheck disable=SC2086
-podman build $build_args \
+podman build "${secret_args[@]}" \
   --file controller/Containerfile \
   --tag localhost/xavier-mutate:local \
   controller

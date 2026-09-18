@@ -8,11 +8,15 @@ import time
 from typing import Callable
 from . import msgsock
 from .msgsock import Messenger, logger
+from .safe_codec import CodecLimits
 from queue import Queue
 
 HEADER_STRUCT = struct.Struct("!IHH")  # message index, chunk index, total chunks
 CHUNK_SIZE = 1200
 HEADER_SIZE = HEADER_STRUCT.size
+# a peer-declared totalchunks above this would reassemble to more than the codec's
+# max frame size anyway, so reject it before allocating the [None] * totalchunks list
+_MAX_CHUNKS_PER_MESSAGE = (CodecLimits().max_encoded_bytes + CHUNK_SIZE - 1) // CHUNK_SIZE
 
 usesingleudpsock = True  # set to True to use single socket for all client-side UDP messengers, set to False to create separate socket for each messenger (not needed since UDP is connectionless)
 udp_msgrs: dict[tuple, "MessengerUDP"] = {}  # (ip, port) to MessengerUDP (for server-side)
@@ -191,12 +195,29 @@ class MessengerUDP(Messenger):
         logger.debug(
             f"Received UDP message chunk from {self.addr} with message index {messageindex}, chunk index {chunkindex}, total chunks {totalchunks}"
         )
+        if not (0 < totalchunks <= _MAX_CHUNKS_PER_MESSAGE) or not (0 <= chunkindex < totalchunks):
+            logger.warning(
+                f"Received UDP message with invalid totalchunks {totalchunks} / chunkindex {chunkindex} "
+                f"from {self.addr} -- ignoring",
+                color="yellow",
+            )
+            self.curdata = b""
+            return False, False, None  # invalid message, close connection
         self.maxmessageindex = max(self.maxmessageindex, messageindex)
         chunkdata = self.curdata[HEADER_SIZE:]
         with self.idxlock:
             if messageindex not in self.messages:
                 self.messages[messageindex] = {"time": time.time(), "data": [None] * totalchunks}
-            self.messages[messageindex]["data"][chunkindex] = chunkdata
+            existing_chunks = self.messages[messageindex]["data"]
+            if len(existing_chunks) != totalchunks:
+                logger.warning(
+                    f"Received UDP message with mismatched totalchunks for message {messageindex} "
+                    f"from {self.addr} -- ignoring chunk",
+                    color="yellow",
+                )
+                self.curdata = b""
+                return True, False, None
+            existing_chunks[chunkindex] = chunkdata
         self.curdata = b""  # clear data after ingesting
         self._cleanup()
         if all(chunk is not None for chunk in self.messages[messageindex]["data"]):

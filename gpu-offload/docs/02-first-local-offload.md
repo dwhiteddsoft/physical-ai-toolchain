@@ -27,7 +27,10 @@ The payload image is `FROM scratch` and only holds the `runtime/` source tree. I
 CONTROLLER_INDEX_ARGS=()
 RUNTIME_INDEX_ARGS=()
 if [[ -n "${PYTHON_INDEX_URL:-}" ]]; then
-  CONTROLLER_INDEX_ARGS=(--build-arg "PIP_INDEX_URL=$PYTHON_INDEX_URL")
+  # passed as a BuildKit secret, not a build arg, so a credential embedded in
+  # PYTHON_INDEX_URL never lands in image history
+  export PIP_INDEX_URL="$PYTHON_INDEX_URL"
+  CONTROLLER_INDEX_ARGS=(--secret id=PIP_INDEX_URL,env=PIP_INDEX_URL)
   RUNTIME_INDEX_ARGS=(--build-arg "UV_INDEX_URL=$PYTHON_INDEX_URL")
 fi
 

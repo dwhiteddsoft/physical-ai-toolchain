@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -42,6 +43,9 @@ READINESS_PROBE = {
     "periodSeconds": 5,
 }
 
+# "secret" is deliberately excluded: the client and server are separately-specified
+# workloads (potentially different images/nodes), and copying a client's Secret
+# volume onto the server would expose its credentials outside their intended scope.
 ALLOWED_SERVER_VOLUME_TYPES = {
     "configMap",
     "downwardAPI",
@@ -50,7 +54,6 @@ ALLOWED_SERVER_VOLUME_TYPES = {
     "hostPath",
     "persistentVolumeClaim",
     "projected",
-    "secret",
 }
 
 
@@ -185,6 +188,11 @@ def _validate_stage(stage: Any, *, index: int) -> dict[str, Any]:
         )
     if "env" in normalized:
         normalized["env"] = _validate_env_list(normalized["env"], field=f"serverstages[{index}].env")
+    if "remoteableenv" in normalized:
+        normalized["remoteableenv"] = _validate_string_list(
+            normalized["remoteableenv"],
+            field=f"serverstages[{index}].remoteableenv",
+        )
     if "resources" in normalized:
         normalized["resources"] = _validate_resources(normalized["resources"], field=f"serverstages[{index}].resources")
     return normalized
@@ -223,6 +231,10 @@ def validate_xavier_config(
         )
     if "env" in normalized:
         normalized["env"] = _validate_env_list(normalized["env"], field=f"{source}.env")
+    if "remoteableenv" in normalized:
+        normalized["remoteableenv"] = _validate_string_list(
+            normalized["remoteableenv"], field=f"{source}.remoteableenv"
+        )
     if "resources" in normalized:
         normalized["resources"] = _validate_resources(normalized["resources"], field=f"{source}.resources")
     if "noserverdeployment" in normalized:
@@ -399,6 +411,19 @@ def _has_xavier_env(container: dict[str, Any]) -> bool:
     return get_env_var(container, "XAVIER_CONTAINER") == "true"
 
 
+# env var names the controller itself injects onto the client (see _add_client_env
+# below); these are offload-protocol metadata, not client-authored data, so they
+# always transfer to the generated server regardless of remoteableenv
+_PROTOCOL_ENV_NAMES = {
+    "REMOTER_CONFIG",
+    "CONFIGFROMKUBE",
+    "SERVERLABEL",
+    "XAVIER_CONTAINER",
+    "STAGE_NAME",
+    "PERCLIENTSERVERLABEL",
+}
+
+
 def _add_client_env(container: dict[str, Any], server_label: str, *, perclient_label: str | None) -> bool:
     changed = False
     changed |= set_env_var_if_not_exists(container, "REMOTER_CONFIG", REMOTE_CONFIG_PATH)
@@ -475,11 +500,22 @@ def get_xavier_container(spec: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+_MAX_K8S_LABEL_LENGTH = 63
+
+
 def _deployment_name(metadata: dict[str, Any], stage: str) -> str:
     deployment_name = f"{metadata['name']}-remote-server"
     if stage:
         deployment_name = f"{deployment_name}-{stage}"
-    return deployment_name
+    if len(deployment_name) <= _MAX_K8S_LABEL_LENGTH:
+        return deployment_name
+    # Kubernetes object names allow up to 253 characters, but this value is also
+    # used as a label value (63-character limit) -- truncate the human-readable
+    # prefix and append a short hash of the full name so two names that collide
+    # after truncation don't collide with each other too.
+    digest = hashlib.sha256(deployment_name.encode()).hexdigest()[:8]
+    prefix_len = _MAX_K8S_LABEL_LENGTH - len(digest) - 1
+    return f"{deployment_name[:prefix_len].rstrip('-')}-{digest}"
 
 
 def _api_version_for_owner(owner_obj: dict[str, Any]) -> str:
@@ -530,6 +566,12 @@ def _volume_is_allowed_for_server(volume: dict[str, Any], allowed_host_paths: se
     if "hostPath" in volume:
         host_path = volume.get("hostPath")
         return isinstance(host_path, dict) and host_path.get("path") in allowed_host_paths
+    if "projected" in volume:
+        # a projected volume can combine a "secret" source with otherwise-safe ones
+        # (configMap, downwardAPI, serviceAccountToken); reject it if it does, same
+        # as a bare "secret" volume
+        sources = volume.get("projected", {}).get("sources", []) or []
+        return not any(isinstance(source, dict) and "secret" in source for source in sources)
     return any(key in volume for key in ALLOWED_SERVER_VOLUME_TYPES)
 
 
@@ -572,14 +614,17 @@ def _merge_env_lists(*env_lists: list[dict[str, str]] | None) -> dict[str, str]:
     return merged
 
 
-def _append_value_from_envs(destination_container: dict[str, Any], source_container: dict[str, Any]) -> None:
+def _append_value_from_envs(
+    destination_container: dict[str, Any], source_container: dict[str, Any], allowed_names: set[str]
+) -> None:
     existing = {env.get("name") for env in destination_container.get("env", []) or []}
     for env_var in source_container.get("env", []) or []:
-        if env_var.get("name") in existing:
+        name = env_var.get("name")
+        if name in existing or name not in allowed_names:
             continue
         if "valueFrom" in env_var:
             destination_container.setdefault("env", []).append(copy.deepcopy(env_var))
-            existing.add(env_var.get("name"))
+            existing.add(name)
 
 
 def create_server_deployment_spec(
@@ -651,7 +696,12 @@ def create_server_deployment_spec(
     container = deployment["spec"]["template"]["spec"]["containers"][0]
     if "imagePullPolicy" in xavier_container:
         container["imagePullPolicy"] = xavier_container["imagePullPolicy"]
-    env_dict = env_vars_to_dict(xavier_container)
+    # the client's env is not trusted by default -- forwarding everything (including
+    # hardcoded credentials) to a separately specified server image/node would
+    # violate least privilege, so only offload-protocol fields and explicitly
+    # allow-listed names (remoteableenv) transfer
+    allowed_env_names = set(getparam(xavierconfig, stage, "remoteableenv") or []) | _PROTOCOL_ENV_NAMES
+    env_dict = {name: value for name, value in env_vars_to_dict(xavier_container).items() if name in allowed_env_names}
     env_dict.update(_merge_env_lists(xavierconfig.get("env"), getparam(xavierconfig, stage, "env")))
     env_dict.update(
         {
@@ -663,10 +713,12 @@ def create_server_deployment_spec(
         }
     )
     if env_dict.get("PERCLIENTSERVERLABEL") == "unknown":
-        base_deployment_name = deployment_name[: -(len(stage) + 1)] if stage else deployment_name
+        # recompute rather than strip "-{stage}" off deployment_name: once
+        # _deployment_name truncates+hashes for length, that suffix isn't there
+        base_deployment_name = _deployment_name(metadata, "")
         env_dict["PERCLIENTSERVERLABEL"] = f"{serverlabelkey()}={base_deployment_name}"
     container["env"] = [{"name": name, "value": value} for name, value in env_dict.items()]
-    _append_value_from_envs(container, xavier_container)
+    _append_value_from_envs(container, xavier_container, allowed_env_names)
 
     node_selector = getparam(xavierconfig, stage, "nodeSelector")
     if node_selector is not None:

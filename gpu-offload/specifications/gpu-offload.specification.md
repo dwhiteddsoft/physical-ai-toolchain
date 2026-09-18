@@ -37,6 +37,10 @@ When a workload carries all three opt-in signals:
 The controller does not:
 
 - Add hostPath volumes, host namespaces, or privileged security contexts
+- Copy Secret volumes, or `projected` volumes that combine a Secret source, from
+  the client container onto the generated server
+- Copy the client container's environment onto the generated server, except for
+  offload-protocol fields and names explicitly listed in `remoteableenv`
 - Modify the application container entrypoint or command
 - Add a readiness probe to application containers
 
@@ -44,6 +48,15 @@ The controller does not:
 
 If `xavierconfig` includes `remoteableconts` list, only those named containers
 are mutated; others are left unchanged.
+
+**Environment filtering:**
+
+The generated server does not inherit the client container's environment by
+default. Only offload-protocol variables the controller itself injects (e.g.
+`REMOTER_CONFIG`, `XAVIER_CONTAINER`) and client variables named in
+`remoteableenv` are copied onto the server; everything else -- including
+`valueFrom` references such as `secretKeyRef` -- is left behind so a client's
+credentials aren't exposed to a separately specified server image or node.
 
 ## Configuration Fields
 
@@ -56,6 +69,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 | `nodeSelector`       | map[string]string     | Implemented | Server pod node selection                             |
 | `securityContext`    | object                | Implemented | Validated server container security context           |
 | `env`                | list of name/value    | Implemented | Environment merged into server container              |
+| `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
 | `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
 | `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
 | `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |

@@ -633,7 +633,7 @@ def test_reconcile_object_deletes_server_deployment_for_removed_stage():
         {"name": "REMOTERPORT", "value": "30001"},
     ]
     # a server Deployment left over from a stage that no longer exists in serverstages
-    stale_name = "client-remote-server-oldstage"
+    stale_name = "client-remote-server-stale"
     apps_api = _FakeAppsApi(
         deployments={
             ("default", stale_name): {

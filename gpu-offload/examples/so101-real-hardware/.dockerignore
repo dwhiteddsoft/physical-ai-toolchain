@@ -1,11 +1,7 @@
 .git
-.gitmodules
 **/.git
 **/.git/**
 **/__pycache__
 **/*.pyc
 data
 outputs
-upstream/.venv
-upstream/docs
-upstream/tests

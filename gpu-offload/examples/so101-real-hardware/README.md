@@ -5,21 +5,9 @@ ms.date: 2026-08-26
 ---
 
 This example packages a pinned
-[LeRobot](https://github.com/huggingface/lerobot) checkout for SO-101 episode
+[LeRobot](https://github.com/huggingface/lerobot) release for SO-101 episode
 collection, fine-tuning, evaluation, and rollout. The image builds for both
 `linux/amd64` and `linux/arm64` and includes the Xavier remoting runtime.
-
-## 📋 Initialize
-
-Initialize the pinned LeRobot submodule after cloning:
-
-```bash
-git submodule update --init --recursive \
-  gpu-offload/examples/so101-real-hardware/upstream
-```
-
-The exact commit is stored by the Git submodule reference. `.lerobot-version` records
-the requested upstream tag, branch, or commit used by image tags and scripts.
 
 ## 📦 Build the image
 
@@ -42,19 +30,21 @@ The amd64 image uses the CUDA-enabled PyTorch version from LeRobot's lock file.
 The arm64 image replaces it with CUDA 13 wheels required by NVIDIA Thor. The
 build reads the remoting package directly from `gpu-offload/runtime` through a
 BuildKit named context, so the image always contains the runtime from the same
-checkout.
+checkout. LeRobot itself is installed from the pinned
+[`lerobot`](https://pypi.org/project/lerobot/) PyPI package declared in
+`pyproject.toml` and locked in `uv.lock`.
 
 ## 🔄 Update LeRobot
 
-Update only to an explicit reviewed tag, branch, or commit:
+Update only to an explicit reviewed release:
 
 ```bash
-./scripts/update_upstream.sh v0.6.2
+./scripts/update_lerobot_version.sh 0.6.2
 ```
 
-The script updates `upstream/` and `.lerobot-version`. Review the upstream
-release notes, rebuild both architectures, run the workflows you use, and then
-commit both changed paths.
+The script updates `pyproject.toml`, `uv.lock`, and `.lerobot-version`. Review
+the release notes, rebuild both architectures, run the workflows you use, and
+then commit the changed paths.
 
 ## ⚙️ Configure SO-101
 
@@ -199,7 +189,7 @@ Move image conversion and the policy processor pipeline to the offload server:
 This mode sends compact `uint8` camera tensors instead of normalized `float32`
 tensors. The example-layer implementation in
 `docker/raw_observation_inference.py` moves image preparation and the policy
-processor pipeline to the server without changing the pinned LeRobot submodule.
+processor pipeline to the server without changing the pinned LeRobot package.
 It demonstrates an optional optimization that requires only a small integration
 wrapper when transparent method offload does not provide enough throughput.
 This mode applies only to synchronous inference and is disabled by default.

@@ -41,33 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/lerobot
 
-COPY --chown=lerobot:lerobot upstream/setup.py upstream/pyproject.toml \
-  upstream/uv.lock upstream/README.md upstream/MANIFEST.in ./
+COPY --chown=lerobot:lerobot pyproject.toml uv.lock ./
 
 RUN chown lerobot:lerobot /opt/lerobot
 
 USER lerobot
 
-RUN uv sync --locked \
-      --extra core_scripts \
-      --extra feetech \
-      --extra training \
-      --extra evaluation \
-      --extra smolvla \
-      --extra pusht \
-      --no-install-project \
-      --no-cache
-
-COPY --chown=lerobot:lerobot upstream/ ./
-
-RUN uv sync --locked \
-      --extra core_scripts \
-      --extra feetech \
-      --extra training \
-      --extra evaluation \
-      --extra smolvla \
-      --extra pusht \
-      --no-cache
+RUN uv sync --locked --no-cache
 
 USER root
 

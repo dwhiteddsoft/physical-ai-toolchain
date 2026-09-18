@@ -1,2 +1,1 @@
-LEROBOT_REPO=https://github.com/huggingface/lerobot.git
-LEROBOT_REF=v0.6.1
+LEROBOT_VERSION=0.6.1

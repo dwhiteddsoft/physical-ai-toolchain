@@ -62,8 +62,8 @@ require_positive_integer() {
 
 pinned_version() {
   local version
-  version="$(sed -n 's/^LEROBOT_REF=//p' "${LEROBOT_DIR}/.lerobot-version")"
-  [[ -n "${version}" ]] || die "LEROBOT_REF is missing from ${LEROBOT_DIR}/.lerobot-version"
+  version="$(sed -n 's/^LEROBOT_VERSION=//p' "${LEROBOT_DIR}/.lerobot-version")"
+  [[ -n "${version}" ]] || die "LEROBOT_VERSION is missing from ${LEROBOT_DIR}/.lerobot-version"
   printf '%s\n' "${version#v}"
 }
 

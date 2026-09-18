@@ -785,6 +785,27 @@ def _normalize_deployment_for_compare(deployment_obj: Any) -> dict[str, Any]:
     return deployment
 
 
+def _is_subset(desired: Any, actual: Any) -> bool:
+    """True if every key/value `desired` specifies is present with an equal value
+    in `actual`. Kubernetes populates many fields we never set (spec.strategy,
+    revisionHistoryLimit, progressDeadlineSeconds, restartPolicy, container
+    terminationMessagePolicy, etc.); comparing for exact equality against the
+    stored object would never match, forcing a patch -- and therefore a MODIFIED
+    watch event that re-triggers reconciliation -- on every single pass.
+    """
+    if isinstance(desired, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _is_subset(value, actual[key]) for key, value in desired.items()
+        )
+    if isinstance(desired, list):
+        return (
+            isinstance(actual, list)
+            and len(desired) == len(actual)
+            and all(_is_subset(d, a) for d, a in zip(desired, actual, strict=True))
+        )
+    return desired == actual
+
+
 def reconcile_named_server_deployment(
     apps_api: client.AppsV1Api,
     *,
@@ -806,7 +827,7 @@ def reconcile_named_server_deployment(
         apps_api.delete_namespaced_deployment(name=deployment_name, namespace=namespace)
         return "deleted"
 
-    if _normalize_deployment_for_compare(existing) == _normalize_deployment_for_compare(desired_spec):
+    if _is_subset(_normalize_deployment_for_compare(desired_spec), _normalize_deployment_for_compare(existing)):
         return "unchanged"
     apps_api.patch_namespaced_deployment(name=deployment_name, namespace=namespace, body=desired_spec)
     return "patched"
@@ -817,6 +838,7 @@ def _orphaned_server_deployment_names(
     *,
     namespace: str,
     parent_name: str,
+    parent_uid: str,
     desired_names: set[str],
 ) -> list[str]:
     """Names of previously-created server Deployments for `parent_name` that are no
@@ -824,19 +846,28 @@ def _orphaned_server_deployment_names(
     serverstages. Without this, reconcile_object only ever touches the current
     desired set and an old server Deployment (and its GPU allocation) is never
     cleaned up while the parent workload still exists.
+
+    Only a Deployment whose ownerReference actually points back to `parent_uid` is
+    treated as an orphan: names are not unique across kinds, so an unrelated
+    object (e.g. a Pod) can legally share a name with an opted-in Deployment that
+    owns an active, in-use `<name>-remote-server*` Deployment.
     """
-    if not parent_name:
+    if not parent_name or not parent_uid:
         return []
     prefix = f"{parent_name}-remote-server"
     existing = apps_api.list_namespaced_deployment(
         namespace=namespace,
         label_selector=f"{XAVIER_DEPLOYMENT_LABEL}=true",
     )
-    return [
-        item.metadata.name
-        for item in existing.items
-        if item.metadata.name.startswith(prefix) and item.metadata.name not in desired_names
-    ]
+    orphans = []
+    for item in existing.items:
+        name = item.metadata.name
+        if not name.startswith(prefix) or name in desired_names:
+            continue
+        owners = getattr(item.metadata, "owner_references", None) or []
+        if any(getattr(owner, "uid", None) == parent_uid for owner in owners):
+            orphans.append(name)
+    return orphans
 
 
 def reconcile_object(
@@ -863,19 +894,35 @@ def reconcile_object(
             deployment_name=deployment_name,
             desired_spec=desired_spec,
         )
-    orphan_names = _orphaned_server_deployment_names(
-        apps_api,
-        namespace=namespace,
-        parent_name=obj.get("metadata", {}).get("name", ""),
-        desired_names=set(desired_deployments),
+
+    # Orphan cleanup only makes sense -- and is only safe -- for an object that is
+    # itself a fully opted-in root workload: that's the only case where this
+    # object is the (sole) owner of a `<name>-remote-server*` family of
+    # Deployments, and the only case where "no longer in serverstages" is a
+    # meaningful signal at all.
+    metadata, spec, xaviercfg = get_metadata_spec(obj, strict=False)
+    is_opted_root = (
+        metadata is not None
+        and spec is not None
+        and xaviercfg is not None
+        and not _is_parent_labeled_pod(metadata)
+        and _is_fully_opted_root_workload(metadata, spec)
     )
-    for deployment_name in orphan_names:
-        outcomes[deployment_name] = reconcile_named_server_deployment(
+    if is_opted_root:
+        orphan_names = _orphaned_server_deployment_names(
             apps_api,
             namespace=namespace,
-            deployment_name=deployment_name,
-            desired_spec=None,
+            parent_name=metadata.get("name", ""),
+            parent_uid=metadata.get("uid", ""),
+            desired_names=set(desired_deployments),
         )
+        for deployment_name in orphan_names:
+            outcomes[deployment_name] = reconcile_named_server_deployment(
+                apps_api,
+                namespace=namespace,
+                deployment_name=deployment_name,
+                desired_spec=None,
+            )
     return outcomes
 
 
@@ -1164,7 +1211,12 @@ def main() -> None:
     controller = XavierAdmissionController(core_api=core_api, apps_api=apps_api, batch_api=batch_api)
     if not args.disable_reconcile:
         runtime = ReconcileRuntime(controller)
-        runtime.start()
+        # Run the initial cluster-wide sync and watch loops in the background so the
+        # webhook server below can start accepting requests immediately instead of
+        # only after the sync completes -- otherwise Kubernetes can route admission
+        # requests (or pass a readiness probe) to this Pod before anything is
+        # actually listening for them.
+        threading.Thread(target=runtime.start, name="reconcile-runtime", daemon=True).start()
 
     ssl_context = None if args.disable_tls else build_ssl_context(args.cert_file, args.key_file)
     server = AdmissionHTTPServer((args.host, args.port), controller, ssl_context=ssl_context)

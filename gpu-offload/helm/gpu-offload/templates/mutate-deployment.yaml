@@ -120,6 +120,13 @@ spec:
           ports:
             - name: webhook
               containerPort: {{ .Values.mutate.webhookPort }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: webhook
+              scheme: HTTPS
+            initialDelaySeconds: 2
+            periodSeconds: 5
           securityContext:
             runAsNonRoot: {{ .Values.mutateSecurityContext.runAsNonRoot }}
             runAsUser: {{ .Values.mutateSecurityContext.runAsUser }}

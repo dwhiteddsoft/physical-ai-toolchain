@@ -8,8 +8,12 @@ from collections.abc import Callable
 
 from . import msgsock
 from .msgsock import Messenger, logger
+from .safe_codec import CodecLimits
 
 _RECEIVE_CHUNK_BYTES = 256 * 1024
+# reject an oversized declared frame length before buffering it, rather than
+# accumulating unbounded data in curmsg only for safe_codec to reject it later
+_MAX_FRAME_BYTES = CodecLimits().max_encoded_bytes
 
 
 class MessengerTCP(Messenger):
@@ -58,6 +62,12 @@ class MessengerTCP(Messenger):
                 if len(self.curmsg) < 4:
                     return True, False, None  # not enough data to get length yet
                 self.msglen = int.from_bytes(self.curmsg[:4], "big")
+                if self.msglen > _MAX_FRAME_BYTES:
+                    logger.warning(
+                        f"Received oversized frame length {self.msglen} from {self.ep} "
+                        f"(max {_MAX_FRAME_BYTES}) -- closing connection"
+                    )
+                    return False, False, None  # reject before buffering to avoid unbounded memory growth
                 logger.debug(f"Received message length from {self.ep}: {self.msglen}")
                 del self.curmsg[:4]
                 self.state = MessengerTCP.GetData

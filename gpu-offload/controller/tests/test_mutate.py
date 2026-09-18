@@ -77,11 +77,17 @@ class _FakeAppsApi:
         for (ns, name), body in self.deployments.items():
             if ns != namespace:
                 continue
+            metadata = body.get("metadata", {}) or {}
             if label_selector:
-                labels = body.get("metadata", {}).get("labels", {}) or {}
+                labels = metadata.get("labels", {}) or {}
                 if labels.get(key_filter) != value_filter:
                     continue
-            items.append(types.SimpleNamespace(metadata=types.SimpleNamespace(name=name)))
+            owner_references = [
+                types.SimpleNamespace(uid=owner.get("uid")) for owner in metadata.get("ownerReferences", []) or []
+            ]
+            items.append(
+                types.SimpleNamespace(metadata=types.SimpleNamespace(name=name, owner_references=owner_references))
+            )
         return types.SimpleNamespace(items=items)
 
 
@@ -624,6 +630,43 @@ def test_reconcile_named_server_deployment_creates_patches_and_deletes():
     ]
 
 
+def test_reconcile_named_server_deployment_ignores_kubernetes_defaulted_fields():
+    mod = _load_mutate_module()
+    desired = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "client-remote-server", "namespace": "default"},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": "client-remote-server"}},
+            "template": {
+                "metadata": {"labels": {"app": "client-remote-server"}},
+                "spec": {"containers": [{"name": "remote-server", "image": "repo/server:1"}]},
+            },
+        },
+    }
+    # what the API server actually stores: our desired fields plus values it
+    # defaults on our behalf (strategy, revisionHistoryLimit, restartPolicy, ...)
+    stored = copy.deepcopy(desired)
+    stored["spec"]["revisionHistoryLimit"] = 10
+    stored["spec"]["progressDeadlineSeconds"] = 600
+    stored["spec"]["strategy"] = {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxSurge": "25%", "maxUnavailable": "25%"},
+    }
+    stored["spec"]["template"]["spec"]["restartPolicy"] = "Always"
+    stored["spec"]["template"]["spec"]["dnsPolicy"] = "ClusterFirst"
+    stored["spec"]["template"]["spec"]["containers"][0]["terminationMessagePolicy"] = "File"
+    apps_api = _FakeAppsApi(deployments={("default", "client-remote-server"): stored})
+
+    outcome = mod.reconcile_named_server_deployment(
+        apps_api, namespace="default", deployment_name="client-remote-server", desired_spec=desired
+    )
+
+    assert outcome == "unchanged"
+    assert apps_api.actions == []
+
+
 def test_reconcile_object_deletes_server_deployment_for_removed_stage():
     mod = _load_mutate_module()
     deploy = _base_workload()
@@ -632,12 +675,18 @@ def test_reconcile_object_deletes_server_deployment_for_removed_stage():
         {"name": "XAVIER_CONTAINER", "value": "true"},
         {"name": "REMOTERPORT", "value": "30001"},
     ]
-    # a server Deployment left over from a stage that no longer exists in serverstages
+    # a server Deployment left over from a stage that no longer exists in serverstages,
+    # owned by this same parent (matching what create_server_deployment_spec sets)
     stale_name = "client-remote-server-stale"
     apps_api = _FakeAppsApi(
         deployments={
             ("default", stale_name): {
-                "metadata": {"name": stale_name, "namespace": "default", "labels": {"xavierdeployment": "true"}},
+                "metadata": {
+                    "name": stale_name,
+                    "namespace": "default",
+                    "labels": {"xavierdeployment": "true"},
+                    "ownerReferences": [{"uid": "workload-uid"}],
+                },
                 "spec": {},
             }
         }
@@ -650,6 +699,38 @@ def test_reconcile_object_deletes_server_deployment_for_removed_stage():
     assert outcomes["client-remote-server"] == "created"
     assert outcomes[stale_name] == "deleted"
     assert ("default", stale_name) not in apps_api.deployments
+
+
+def test_reconcile_object_does_not_delete_unowned_deployment_with_same_name_prefix():
+    mod = _load_mutate_module()
+    # an unrelated, non-opted-in Pod that happens to share a name with a
+    # Deployment which legitimately owns "client-remote-server"
+    pod = {
+        "kind": "Pod",
+        "metadata": {"name": "client", "namespace": "default", "uid": "unrelated-pod-uid"},
+        "spec": {"containers": [{"name": "app", "image": "repo/app:1"}]},
+    }
+    active_name = "client-remote-server"
+    apps_api = _FakeAppsApi(
+        deployments={
+            ("default", active_name): {
+                "metadata": {
+                    "name": active_name,
+                    "namespace": "default",
+                    "labels": {"xavierdeployment": "true"},
+                    "ownerReferences": [{"uid": "some-other-deployments-uid"}],
+                },
+                "spec": {},
+            }
+        }
+    )
+    core_api = _FakeCoreApi()
+    batch_api = _FakeBatchApi()
+
+    outcomes = mod.reconcile_object(pod, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    assert outcomes == {}
+    assert ("default", active_name) in apps_api.deployments
 
 
 def test_forbidden_mutations_are_not_applied():

@@ -11,6 +11,10 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # Pinned NVIDIA Kubernetes device plugin. Bare metal exposes a working NVML, so
 # the official plugin replaces the generic device plugin the WSL path needs.
 DEVICE_PLUGIN_VERSION="${DEVICE_PLUGIN_VERSION:-v0.17.4}"
+# Digest for the default DEVICE_PLUGIN_VERSION above. Kubernetes pulls by digest
+# when both tag and digest are present, so an overridden --plugin-version must come
+# with a matching --plugin-digest or the node silently runs the old pinned image.
+DEVICE_PLUGIN_DIGEST="${DEVICE_PLUGIN_DIGEST:-sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd}"
 
 show_help() {
   cat << EOF
@@ -27,6 +31,7 @@ OPTIONS:
     -h, --help               Show this help message
     -c, --context NAME       Kubeconfig context (default: $DEFAULT_CONTEXT)
     --plugin-version VER     Device plugin version (default: $DEVICE_PLUGIN_VERSION)
+    --plugin-digest DIGEST   Device plugin image digest, sha256:<hex> (default: $DEVICE_PLUGIN_DIGEST)
     --config-preview         Print configuration and exit
 
 EXAMPLES:
@@ -45,10 +50,18 @@ while [[ $# -gt 0 ]]; do
     -h|--help)          show_help; exit 0 ;;
     -c|--context)       context="$2"; shift 2 ;;
     --plugin-version)   DEVICE_PLUGIN_VERSION="$2"; shift 2 ;;
+    --plugin-digest)    DEVICE_PLUGIN_DIGEST="$2"; shift 2 ;;
     --config-preview)   config_preview=true; shift ;;
     *)                  fatal "Unknown option: $1" ;;
   esac
 done
+
+# A --plugin-version override without a matching --plugin-digest would pull by
+# digest (Kubernetes prefers digest over tag when both are set) and silently keep
+# the old default's image instead of the requested version.
+if [[ "$DEVICE_PLUGIN_VERSION" != "v0.17.4" && "$DEVICE_PLUGIN_DIGEST" == "sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd" ]]; then
+  fatal "--plugin-version was overridden to $DEVICE_PLUGIN_VERSION but --plugin-digest was not; pass the matching digest with --plugin-digest to avoid pinning the new version's tag to the old default's image"
+fi
 
 require_tools kubectl nvidia-smi
 
@@ -65,7 +78,7 @@ register_timeout="${GPU_PLUGIN_REGISTER_TIMEOUT:-600}"
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Kube context" "$context"
-  print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION"
+  print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION@$DEVICE_PLUGIN_DIGEST"
   print_kv "k3s drop-in" "$k3s_dropin"
   exit 0
 fi
@@ -130,7 +143,7 @@ spec:
         - operator: Exists
       containers:
         - name: nvidia-device-plugin-ctr
-          image: nvcr.io/nvidia/k8s-device-plugin:$DEVICE_PLUGIN_VERSION
+          image: nvcr.io/nvidia/k8s-device-plugin:${DEVICE_PLUGIN_VERSION}@${DEVICE_PLUGIN_DIGEST}
           env:
             - name: FAIL_ON_INIT_ERROR
               value: "true"
@@ -191,5 +204,5 @@ section "Deployment Summary"
 print_kv "Kube context" "$context"
 print_kv "Node" "$node"
 print_kv "Allocatable nvidia.com/gpu" "$gpu_allocatable"
-print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION"
+print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION@$DEVICE_PLUGIN_DIGEST"
 info "Bare-metal GPU is available to Kubernetes workloads"

@@ -1,6 +1,9 @@
 image:
   repository: lerobot-so101
   tag: "0.6.1"
+  # Leave tag empty and set digest to a sha256 pin for reproducible, tamper-evident
+  # deploys (recommended). When digest is set it wins over tag.
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Empty by default: the documented local k3s setup (configure-k3s-nvidia.sh) makes

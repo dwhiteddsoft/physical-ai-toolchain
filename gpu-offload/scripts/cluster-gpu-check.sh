@@ -28,8 +28,8 @@ trap cleanup EXIT
 
 if [ "$GPU_OFFLOAD_PLATFORM" = "wsl-nvidia" ]; then
   archive="$(mktemp --suffix=-nvidia-cuda.tar)"
-  podman pull docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
-  podman save --output "$archive" docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+  podman pull docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04@sha256:133c78a0575303be34164d0b90137a042172bdf60696af01a3c424ab402d86e2
+  podman save --output "$archive" docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04@sha256:133c78a0575303be34164d0b90137a042172bdf60696af01a3c424ab402d86e2
   KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive "$archive" \
     --name "$GPU_OFFLOAD_CLUSTER_NAME"
   rm -f "$archive"
@@ -42,7 +42,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: cuda
-      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04@sha256:133c78a0575303be34164d0b90137a042172bdf60696af01a3c424ab402d86e2
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -65,7 +65,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: cuda
-      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.8.1-base-ubuntu24.04@sha256:133c78a0575303be34164d0b90137a042172bdf60696af01a3c424ab402d86e2
       command: ["nvidia-smi"]
       resources:
         limits:

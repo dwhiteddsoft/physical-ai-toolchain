@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import threading
 import uuid
 
@@ -378,16 +379,14 @@ def test_imagep_style_adapter() -> None:
         image.recompress_quality = state["recompress_quality"]  # type: ignore[assignment]
         return image
 
-    try:
+    # Adapter may already be registered when tests are re-run in the same interpreter.
+    with contextlib.suppress(ValueError):
         remoter.register_state_adapter(
             ext_code=30,
             cls=ImageP,
             encode_state=encode_state,
             decode_state=decode_state,
         )
-    except ValueError:
-        # Adapter may already be registered when tests are re-run in the same interpreter.
-        pass
 
     image = ImageP(b"abcdefghij")
     image.setremoteloc("tcp://10.0.0.1:9000")

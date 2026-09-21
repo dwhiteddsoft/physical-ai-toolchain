@@ -96,7 +96,7 @@ class MessengerTCP(Messenger):
         # insert 4 byte length header before message which is last element of message list
         msglen = sum(len(m) for m in message)
         logger.debug(f"Sending message to {self.ep} of length {msglen} plus header length 4 to indicate message length")
-        message = [msglen.to_bytes(4, "big")] + message
+        message = [msglen.to_bytes(4, "big")] + message  # noqa: RUF005 vendored from microsoft/xavier, not refactored
         return msgsock.sendallmsg(self.sock, message)
 
 

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import threading
 import socket
 import socketserver
 import struct
+import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+from queue import Queue
+
 from . import msgsock
 from .msgsock import Messenger, logger
 from .safe_codec import CodecLimits
-from queue import Queue
 
 HEADER_STRUCT = struct.Struct("!IHH")  # message index, chunk index, total chunks
 CHUNK_SIZE = 1200
@@ -18,9 +19,9 @@ HEADER_SIZE = HEADER_STRUCT.size
 # max frame size anyway, so reject it before allocating the [None] * totalchunks list
 _MAX_CHUNKS_PER_MESSAGE = (CodecLimits().max_encoded_bytes + CHUNK_SIZE - 1) // CHUNK_SIZE
 
-usesingleudpsock = True  # set to True to use single socket for all client-side UDP messengers, set to False to create separate socket for each messenger (not needed since UDP is connectionless)
-udp_msgrs: dict[tuple, "MessengerUDP"] = {}  # (ip, port) to MessengerUDP (for server-side)
-udp_msgrs_client: dict[tuple, "MessengerUDP"] = {}  # (ip, port) to MessengerUDP (for client-side)
+usesingleudpsock = True  # set to True to use single socket for all client-side UDP messengers, set to False to create separate socket for each messenger (not needed since UDP is connectionless)  # noqa: E501 vendored from microsoft/xavier, not refactored
+udp_msgrs: dict[tuple, MessengerUDP] = {}  # (ip, port) to MessengerUDP (for server-side)
+udp_msgrs_client: dict[tuple, MessengerUDP] = {}  # (ip, port) to MessengerUDP (for client-side)
 lock = threading.RLock()  # lock to protect udp_msgrs
 bitrate = 50 * 1024 * 1024  # 100 Mbps bitrate for UDP messenger, can be adjusted as needed
 tokenbucket = (
@@ -28,7 +29,7 @@ tokenbucket = (
 )  # token bucket size for rate limiting UDP messages, set to 10ms worth of data at the bitrate
 tokenbucket = min(tokenbucket, 10 * 1024 * 8)  # cap token bucket at 10KB to prevent excessive memory usage
 singlesock: socket.socket | None = (
-    None  # single socket for client-side UDP messengers to use, since UDP is connectionless, we can reuse the same socket for all outgoing messages
+    None  # single socket for client-side UDP messengers to use, since UDP is connectionless, we can reuse the same socket for all outgoing messages  # noqa: E501 vendored from microsoft/xavier, not refactored
 )
 
 
@@ -48,14 +49,14 @@ def udpthread():
             allmsngrs = list(udp_msgrs.values()) + list(udp_msgrs_client.values())
         curtime = time.time()
         for msgr in allmsngrs:
-            msgr: "MessengerUDP" = msgr
+            msgr: MessengerUDP = msgr
             msgr._tokenfill(curtime)
             msgr._cleanup(curtime)
 
 
 def initUDP():
     global singlesock
-    if usesingleudpsock:  # use single socket for client-side messengers, set to False to create separate socket for each messenger (not needed)
+    if usesingleudpsock:  # use single socket for client-side messengers, set to False to create separate socket for each messenger (not needed)  # noqa: E501 vendored from microsoft/xavier, not refactored
         singlesock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # bind to a random free port on all interfaces (not just loopback -- the server may be on a remote host)
         # for receiving responses; each MessengerUDP later calls connect() to set its default send destination,
@@ -96,7 +97,7 @@ class MessengerUDP(Messenger):
             assert isserver or singlesock is not None, (
                 "Client-side MessengerUDP requires a socket to be provided or a single socket to be available"
             )
-            self.sock = singlesock  # if None, use recvQ with single socket for receiving, if not None then use this socket for sending and receiving
+            self.sock = singlesock  # if None, use recvQ with single socket for receiving, if not None then use this socket for sending and receiving  # noqa: E501 vendored from microsoft/xavier, not refactored
         self.isserver = isserver
         self.recvQ = Queue()  # queue to receive messages from recv thread
         startrecvthread = True  # for UDP, always start recv thread
@@ -116,7 +117,7 @@ class MessengerUDP(Messenger):
         self.lasttokenfill = time.time()
         self.curdata = b""
         self.tokens = tokenbucket  # initialize tokens to full bucket for rate limiting
-        # convert host to IP address for client-side messengers since server will send messages to IP address and we need to match that in recv thread
+        # convert host to IP address for client-side messengers since server will send messages to IP address and we need to match that in recv thread  # noqa: E501 vendored from microsoft/xavier, not refactored
         hostip = socket.gethostbyname(host)
         if not isserver:
             with lock:
@@ -146,7 +147,7 @@ class MessengerUDP(Messenger):
             )
             try:
                 data, retaddr = self.sock.recvfrom(4096)  # receive up to 4096 bytes at a time
-            except socket.error as e:
+            except OSError as e:
                 # for UDP this is unlikely to happen since sockets don't close, rely on heartbeat to do close
                 logger.debug(f"Socket error on recv {e}")
                 return b""  # indicate connection closed or error by returning empty bytes
@@ -187,13 +188,13 @@ class MessengerUDP(Messenger):
             return True, True, None  # done with data chunk
         if len(self.curdata) < HEADER_SIZE:
             logger.warning(
-                f"Received UDP message too short to contain header from {self.addr}  of length {len(self.curdata)} -- ignoring",
+                f"Received UDP message too short to contain header from {self.addr}  of length {len(self.curdata)} -- ignoring",  # noqa: E501 vendored from microsoft/xavier, not refactored
                 color="yellow",
             )
             return False, False, None  # invalid message, close connection
         messageindex, chunkindex, totalchunks = HEADER_STRUCT.unpack(self.curdata[:HEADER_SIZE])
         logger.debug(
-            f"Received UDP message chunk from {self.addr} with message index {messageindex}, chunk index {chunkindex}, total chunks {totalchunks}"
+            f"Received UDP message chunk from {self.addr} with message index {messageindex}, chunk index {chunkindex}, total chunks {totalchunks}"  # noqa: E501 vendored from microsoft/xavier, not refactored
         )
         if not (0 < totalchunks <= _MAX_CHUNKS_PER_MESSAGE) or not (0 <= chunkindex < totalchunks):
             logger.warning(
@@ -231,11 +232,11 @@ class MessengerUDP(Messenger):
         if not self.isserver and self.sock is not None and self.sock != singlesock:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
-            except socket.error as e:
+            except OSError as e:
                 logger.debug(f"Socket error on shutdown {e}")
             try:
                 self.sock.close()
-            except socket.error as e:
+            except OSError as e:
                 logger.debug(f"Socket error on close {e}")
         else:
             logger.info(f"Adding empty message to recv queue to signal recv thread to exit for {self.addr}")
@@ -271,7 +272,7 @@ class MessengerUDP(Messenger):
             with self.idxlock:
                 self.tokens -= totalchunklen * 8  # convert bytes to bits for token calculation
             logger.debug(
-                f"Sending chunk {chunkindex + 1}/{numchunks} of message {messageindex} to {self.ep} of length {totalchunklen}"
+                f"Sending chunk {chunkindex + 1}/{numchunks} of message {messageindex} to {self.ep} of length {totalchunklen}"  # noqa: E501 vendored from microsoft/xavier, not refactored
             )
             assert self.sock is not None, "Socket is None in _sendmessage of MessengerUDP"
             msgsock.sendmsg(self.sock, sendmsgs, [], 0, self.addr)
@@ -285,7 +286,7 @@ def handleUDPPacket(
     isserver: bool,
     request: tuple[bytes, socket.socket],
     client_address: tuple[str, int],
-    msgrs: dict[tuple, "MessengerUDP"],
+    msgrs: dict[tuple, MessengerUDP],
     lock: threading.RLock,
     initfn: Callable[[Messenger, str], None] | None = None,
     handlefn: Callable[[bytes, Messenger, str], None] | None = None,
@@ -295,12 +296,12 @@ def handleUDPPacket(
     clientip, clientport = client_address
     addr = (clientip, int(clientport))
     logger.debug(f"GLOBAL RECV from {addr} - {len(data)} bytes")
-    msgr = msgrs.get(addr, None)
+    msgr = msgrs.get(addr)
     if msgr is None:
         with lock:
             if addr not in msgrs:
                 assert isserver, (
-                    f"Received UDP message from unknown client address {addr} on client side, keys in msgrs: {list(msgrs.keys())}"
+                    f"Received UDP message from unknown client address {addr} on client side, keys in msgrs: {list(msgrs.keys())}"  # noqa: E501 vendored from microsoft/xavier, not refactored
                 )
                 logger.info(f"New UDP connection from {addr} - creating MessengerUDP", color="green")
                 # creattion will add to msgrs, so we can safely put message into recvQ after creation

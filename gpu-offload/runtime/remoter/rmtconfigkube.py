@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import copy
-from kubernetes import client, config, watch
 import os
 import threading
 import traceback
+
 import yaml
+from kubernetes import client, config, watch
+
 from . import rmtconfig
 from .k8sutils_compat import utils
 
@@ -47,7 +49,7 @@ def get_pod_socket_path(pod: client.V1Pod) -> str | None:
                 for envvar in container.env:
                     if envvar.name == "REMOTERSOCK":
                         ret = envvar.value
-    # if ret is directory or does not end in .sock, assume it specifies directory and generate socket file name as remotersock/podname-poduid.sock
+    # if ret is directory or does not end in .sock, assume it specifies directory and generate socket file name as remotersock/podname-poduid.sock  # noqa: E501 vendored from microsoft/xavier, not refactored
     if (
         ret
         and (os.path.isdir(ret) or not ret.endswith(".sock"))
@@ -67,7 +69,7 @@ def on_pod(event_type: str, pod: client.V1Pod, lock: threading.Lock, keys: dict,
         remove = True
     assert pod.status is not None, "Pod status is None"
     assert pod.metadata is not None, "Pod metadata is None"
-    if (event_type == "ADDED" or event_type == "MODIFIED") and not remove:
+    if (event_type == "ADDED" or event_type == "MODIFIED") and not remove:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
         # check if pod is running
         if pod.status and pod.status.phase == "Running":
             # also check if containers are ready
@@ -90,7 +92,7 @@ def on_pod(event_type: str, pod: client.V1Pod, lock: threading.Lock, keys: dict,
             labelskv.append(f"{k}={v}")
 
     with lock:
-        for serverlabel in keys.keys():
+        for serverlabel in keys:
             print("Checking pod labels:", labelskv, "for serverlabel", serverlabel)
             if serverlabel in labelskv:
                 if serverlabel not in locations:
@@ -214,9 +216,8 @@ def getserverlabel(config, loc) -> str:
 
 # serverlabel only written if remoteloc is specified
 def rewrite_taskconfig(taskconfig: str):
-    defserverlabel = os.environ.get("SERVERLABEL", "remoteserver=true")
     isserver = os.environ.get("SERVER", "false").lower() in ["true", "1", "yes"]
-    with open(taskconfig, "r") as f:
+    with open(taskconfig) as f:
         cfg = yaml.safe_load(f)
 
     # rewrite following fields: remoteableserver, remoteoableon, remoteloc
@@ -225,7 +226,7 @@ def rewrite_taskconfig(taskconfig: str):
     cfgnew.pop("remoteableserver", None)
     cfgnew.pop("remoteableon", None)
     for func in cfgnew.get("remotefuncs", []):
-        for target_path, params in func.items():
+        for target_path, params in func.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
             # functions are always remoteable
             if "remoteloc" in params:
                 serverlabel = getserverlabel(cfg, params["remoteloc"])
@@ -234,7 +235,7 @@ def rewrite_taskconfig(taskconfig: str):
             params.pop("remoteableserver", None)
             params.pop("remoteableon", None)
     for cls in cfgnew.get("remoteclasses", []):
-        for target_path, params in cls.items():
+        for target_path, params in cls.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
             # classes are remoteable based on config
             if "remoteloc" in params:
                 serverlabel = getserverlabel(cfg, params["remoteloc"])
@@ -318,7 +319,7 @@ def rmtconfigkube_init(taskconfig, locconfigfile) -> tuple[dict, str]:
     lock = threading.Lock()
 
     # add existing pods
-    if namespace:
+    if namespace:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
         pods = v1api.list_namespaced_pod(namespace)
     else:
         pods = v1api.list_pod_for_all_namespaces()

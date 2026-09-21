@@ -7,14 +7,16 @@ operations to prevent concurrent access issues.
 
 from __future__ import annotations
 
-import os
 import copy
-import threading
 import logging
+import os
+import threading
+
 import filelock
+import flask
 import watchfiles
 import yaml
-import flask
+
 from .simplelog import initlog
 
 
@@ -22,7 +24,7 @@ def read_config_file(file_path):
     # lock the file to prevent concurrent access
     with filelock.FileLock(file_path + ".lock"):
         try:
-            with open(file_path, "r", encoding="utf-8") as file:
+            with open(file_path, encoding="utf-8") as file:
                 # read the YAML file
                 config = yaml.safe_load(file)
         except (FileNotFoundError, yaml.YAMLError) as e:
@@ -45,7 +47,7 @@ def write_config_file(file_path, config):
             with open(file_path, "w", encoding="utf-8") as file:
                 # write the YAML file
                 yaml.safe_dump(config, file)
-        except (yaml.YAMLError, IOError) as e:
+        except (OSError, yaml.YAMLError) as e:
             logger.error(f"Error writing configuration file {file_path}: {e}")
             raise e  # re-raise the exception to notify the caller
     try:

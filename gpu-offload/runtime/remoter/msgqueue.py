@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from queue import Queue
-from typing import Callable
 import threading
+from collections.abc import Callable
+from queue import Queue
 
 
 def queueMessage(queue: Queue[bytes], msg: bytes):

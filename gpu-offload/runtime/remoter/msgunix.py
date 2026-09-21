@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import atexit
 import os
 import socket
 import socketserver
-import atexit
 import threading
+from collections.abc import Callable
+
 from . import msgtcp
-from typing import Callable
-from .msgsock import Messenger, logger
 from .k8sutils_compat import utils
+from .msgsock import Messenger, logger
 
 if not hasattr(socket, "AF_UNIX"):
     logger.warning(
@@ -19,8 +20,8 @@ if not hasattr(socket, "AF_UNIX"):
         def __init__(self, *args, **kwargs):
             raise NotImplementedError("AF_UNIX not supported on this platform")
 
-    setattr(socketserver, "ThreadingUnixStreamServer", UnsupportedUnixSocket)
-    setattr(socket, "AF_UNIX", None)
+    socketserver.ThreadingUnixStreamServer = UnsupportedUnixSocket
+    socket.AF_UNIX = None
 
 
 class MessengerUnix(msgtcp.MessengerTCP):

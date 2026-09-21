@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from .msgtcp import MessengerTCP, MessageServerTCP
-from .msgudp import MessengerUDP, MessageServerUDP
-from .msgunix import MessengerUnix, MessageServerUnix
-from .msgsock import Messenger
-from typing import Callable
 import socket
+from collections.abc import Callable
+
+from .msgsock import Messenger
+from .msgtcp import MessageServerTCP, MessengerTCP
+from .msgudp import MessageServerUDP, MessengerUDP
+from .msgunix import MessageServerUnix, MessengerUnix
 
 
 def CreateMessageServer(

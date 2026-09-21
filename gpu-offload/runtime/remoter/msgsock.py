@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import enum
-import secrets
 import logging
+import secrets
 import socket
 import threading
-from concurrent.futures import ThreadPoolExecutor
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from typing import Callable
+
 from .simplelog import initlog
 
 logger = initlog("sockmessage.log", logging.DEBUG, logging.INFO)
@@ -24,7 +26,7 @@ noncelen = 12  # length of nonce for AESGCM
 
 if not hasattr(socket, "AF_UNIX"):
 
-    def sendmsg(sock: socket.socket, buffers, ancdata=[], flags=0, address: tuple[str, int] | str = ""):
+    def sendmsg(sock: socket.socket, buffers, ancdata=[], flags=0, address: tuple[str, int] | str = ""):  # noqa: B006 vendored from microsoft/xavier, not refactored
         # just concatenate buffers and send as normal message for win32
         data = b"".join(buffers)
         if sock.type == socket.SOCK_STREAM:
@@ -45,7 +47,6 @@ else:
 
 def sendallmsg(sock: socket.socket, buffers: list[bytes | memoryview]) -> int:
     views = [memoryview(buffer) for buffer in buffers if len(buffer) > 0]
-    total = sum(len(view) for view in views)
     senttotal = 0
 
     while views:
@@ -81,7 +82,7 @@ def decryptMessage(msg: bytes, decryptkey: bytes) -> bytes | None:
 
 initheartbeat = False  # whether heartbeat has been started or not
 heartbeatlock = threading.Lock()  # lock to make sure only one heartbeat thread is started
-messengers: list["Messenger"] = []  # list of all active messengers for sending heartbeats
+messengers: list[Messenger] = []  # list of all active messengers for sending heartbeats
 heartbeattime = 10
 
 
@@ -114,9 +115,9 @@ class Messenger:
     def __init__(
         self,
         ep: str,
-        initfn: Callable[["Messenger", str], None] | None = None,
-        handlefn: Callable[[bytes, "Messenger", str], None] | None = None,
-        closefn: Callable[["Messenger", str], None] | None = None,
+        initfn: Callable[[Messenger, str], None] | None = None,
+        handlefn: Callable[[bytes, Messenger, str], None] | None = None,
+        closefn: Callable[[Messenger, str], None] | None = None,
     ):
         # heartbeat message
         self.heartbeat = int.to_bytes(MsgType.Heartbeat.value, 1, "big")  # for 1 byte, endian doesn't really matter
@@ -207,11 +208,11 @@ class Messenger:
             failed = False
             self._ingestrecvdata(
                 data
-            )  # ingest raw data into buffer and try to assemble messages, handle messages if fully assembled, return False if connection should be closed, True to continue receiving
+            )  # ingest raw data into buffer and try to assemble messages, handle messages if fully assembled, return False if connection should be closed, True to continue receiving  # noqa: E501 vendored from microsoft/xavier, not refactored
             while True:
                 success, complete, msg = self._handlerecvbytes()  # handle raw data and return message if assembled
                 logger.debug(
-                    f"Received message from {self.ep} -- success: {success} -- msglen: {len(msg) if msg is not None else 'N/A'}"
+                    f"Received message from {self.ep} -- success: {success} -- msglen: {len(msg) if msg is not None else 'N/A'}"  # noqa: E501 vendored from microsoft/xavier, not refactored
                 )
                 if not success:
                     logger.warning(

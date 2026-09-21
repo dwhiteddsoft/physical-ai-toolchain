@@ -101,21 +101,18 @@ def modifyloc(loc: str, key: str, actclasskey: str) -> str:
     if loc == "direct" or loc == "directqueue":
         return loc
     try:
-        protocol, addr = loc.split("://")
+        protocol, addr = loc.split("://")  # noqa: RUF059 vendored from microsoft/xavier, not refactored
         return loc
     except ValueError:
         # handle no protocol specified case, default to tcp and check override for function
         if loc.startswith("unix:"):
-            protocol = "unix"
             loc = f"unix://{loc[5:]}"
         else:
             useudp = os.environ.get("USE_UDP", "false").lower() in ["true", "1", "yes"]
             useudp = getparam("udp", key, actclasskey, useudp)  # check config for whether to use udp for this function
-            if useudp:
-                protocol = "udp"
+            if useudp:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
                 loc = f"udp://{loc}"
             else:
-                protocol = "tcp"
                 loc = f"tcp://{loc}"
         return loc
 
@@ -234,12 +231,12 @@ def setparams(config: dict):
 
 
 # for example, if base class has mod.base.func, classkey is mod.base, funckey is mod.class.func
-#    however, actclass can be different such as modd.derived (modd is a different module with derived class 'derived' inheriting from base)
+#    however, actclass can be different such as modd.derived (modd is a different module with derived class 'derived' inheriting from base)  # noqa: E501 vendored from microsoft/xavier, not refactored
 #    funckey is found using
-#       func.__module__ and func.__qualname__ to get module, class, and function name, and then constructing mod.class.func
+#       func.__module__ and func.__qualname__ to get module, class, and function name, and then constructing mod.class.func  # noqa: E501 vendored from microsoft/xavier, not refactored
 #       func.__qualname__ which gives mod.class.func, and then splitting by "." to get class name and function name
 #    classkey however is found using
-#       obj.__class__.__module__ and obj.__class__.__name__ to get module and class name, and then constructing mod.class
+#       obj.__class__.__module__ and obj.__class__.__name__ to get module and class name, and then constructing mod.class  # noqa: E501 vendored from microsoft/xavier, not refactored
 def getparam(key: str, funckey: str | None, actclasskey: str | None, default: Any):
     # print(key, funckey)
     logger.debug(f"Getting param {key} for function {funckey} -- default={default}")
@@ -271,7 +268,7 @@ def getdictparam(key: str, funckey: str, actclasskey: str) -> dict:
     else:
         module, classname, _ = funckey.split("/")
     classkey = f"{module}/{classname}"
-    # priority order for params: overall -> base class -> actual class -> function specific, with later ones overwriting earlier ones
+    # priority order for params: overall -> base class -> actual class -> function specific, with later ones overwriting earlier ones  # noqa: E501 vendored from microsoft/xavier, not refactored
     if key in remoterparams:
         ret.update(remoterparams[key])  # overall params
     if classkey in remoterclassparams and key in remoterclassparams[classkey]:
@@ -367,7 +364,7 @@ class MetaRemotedUUID:
         self.rmtloc_rmt0bf = x.rmtloc_rmt0bf
         name = f"{x.__class__.__module__}/{x.__class__.__name__}"
         # self.name always store the actual class name
-        if name in stub_to_class:
+        if name in stub_to_class:  # noqa: SIM401 vendored from microsoft/xavier, not refactored
             self.name = stub_to_class[name]
         else:
             self.name = name
@@ -392,7 +389,7 @@ class MetaRemotedUUID:
         x.rmtloc_rmt0bf = self.rmtloc_rmt0bf
         if x.rmtloc_rmt0bf in ["direct", "directqueue"] and alternateloc is not None:
             logger.info(
-                f"Using alternateloc {alternateloc} for direct/directqueue remoted class instance for object of type {type(x)} with ID {self.uuid_rmt0bf}"
+                f"Using alternateloc {alternateloc} for direct/directqueue remoted class instance for object of type {type(x)} with ID {self.uuid_rmt0bf}"  # noqa: E501 vendored from microsoft/xavier, not refactored
             )
             x.rmtloc_rmt0bf = alternateloc
         # if remoter.islocself(x.rmtloc_rmt0bf):
@@ -621,17 +618,17 @@ def dehydrate(obj: Any, key: str, remotedclasscache: dict, loc: str, isresult: b
     ):  # this is more appropriate since isinstance will return true for subclasses
         if not localhasattr(obj, "uuid_rmt0bf"):
             assert isresult, (
-                f"Remoted class instance of type {obj.__class__} without uuid_rmt0bf found during dehydration on client side"
+                f"Remoted class instance of type {obj.__class__} without uuid_rmt0bf found during dehydration on client side"  # noqa: E501 vendored from microsoft/xavier, not refactored
             )
             initfields(obj)
             if isresult:
-                # set remoteloc to loc - on server side loc is coming from funcargs which is the location of server as seen by client
+                # set remoteloc to loc - on server side loc is coming from funcargs which is the location of server as seen by client  # noqa: E501 vendored from microsoft/xavier, not refactored
                 obj.rmtloc_rmt0bf = loc
                 obj.rmtowner_rmt0bf = True
         ret = MetaRemotedUUID(obj)
         logger.info(f"Dehydrating for key {key}")
         logger.info(
-            f"Dehydrating remoted class of type {obj.__class__} with ID {obj.uuid_rmt0bf} - dehydrate={dehydratermt} result={isresult}"
+            f"Dehydrating remoted class of type {obj.__class__} with ID {obj.uuid_rmt0bf} - dehydrate={dehydratermt} result={isresult}"  # noqa: E501 vendored from microsoft/xavier, not refactored
         )
         if not dehydratermt:
             if loc in ["direct", "directqueue"]:
@@ -765,12 +762,12 @@ def decode_function_call(
         "class_name": class_name,
     }
     # rehydrate args on server side
-    if conn is not None:
+    if conn is not None:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
         clientloc = conn.get("key", "")
     else:
         clientloc = None
     argsn, kwargs = rehydrate_args(args, kwargs, remotedClasses, clientloc, callbackOnCacheAdd)
-    if func_name == "__init__":
+    if func_name == "__init__":  # noqa: SIM102 vendored from microsoft/xavier, not refactored
         if len(argsn) > 0 and type(argsn[0]) in remotedClasses:
             # set the remoted class owner to True
             argsn[0].rmtowner_rmt0bf = True
@@ -1004,7 +1001,7 @@ class Remoter:
                         else:
                             self.runloc[k]["choices"][i] = f"{host}:{self.rmtport}"
                 logger.debug(f"Run location {k} choices: {self.runloc[k]['choices']}")
-                self.runloc[k]["weights"] = [float(v["locations"][k]) for k in v["locations"].keys()]
+                self.runloc[k]["weights"] = [float(v["locations"][k]) for k in v["locations"].keys()]  # noqa: SIM118 vendored from microsoft/xavier, not refactored
                 if v.get(
                     "allowterminate", True
                 ):  # and k not in remotedclasskey - even if it is, let it terminate so new class gets created
@@ -1058,7 +1055,7 @@ class Remoter:
         if "thread" in fn:
             # stop the thread - this is a hack
             t: threading.Thread = fn["thread"]
-            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(t.native_id, ctypes.py_object(SystemExit))
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(t.native_id, ctypes.py_object(SystemExit))
         elif "process" in fn:
             p: Process = fn["process"]
             p.terminate()
@@ -1135,7 +1132,7 @@ class Remoter:
         # get the function object
         if hasattr(func, "__wrapped__"):
             func = func.__wrapped__
-        if inspect.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):  # noqa: SIM108 vendored from microsoft/xavier, not refactored
             result = asyncio.run(func(*args, **kwargs))
         else:
             result = func(*args, **kwargs)
@@ -1216,14 +1213,14 @@ class Remoter:
             logger.debug(f"Remoted class keys: {remotedclasskey}")
             allowed_print = True
         try:
-            key, module_name, func_name, class_name = getfuncname(func)
+            key, module_name, func_name, class_name = getfuncname(func)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
             logger.debug(f"Running function with ID {fnid} -- function: {key}")
             if key not in allowed_functions and not self.allowall:
                 logger.error(f"Function {key} is not allowed to be called remotely")
                 raise Exception(f"Function {key} is not allowed to be called remotely")
             result = self.runfunc(func, *args, **kwargs)
             logger.debug(f"Function with ID {fnid} completed execution")
-            if funcargs["func_name"] == "__init__":
+            if funcargs["func_name"] == "__init__":  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                 if len(args) > 0 and type(args[0]) in remotedclasses:
                     assert result is None, "__init__ should not return a value"
                     result = args[0].uuid_rmt0bf
@@ -1266,7 +1263,7 @@ class Remoter:
             if localhasattr(arg, "rmtloc_rmt0bf") and arg.rmtloc_rmt0bf is not None:
                 # if any of the remoted class arguments has a location set, use that location
                 logger.debug(
-                    f"Using remoted class argument location {arg.rmtloc_rmt0bf} for function {taskname} - classuid: {classuid}"
+                    f"Using remoted class argument location {arg.rmtloc_rmt0bf} for function {taskname} - classuid: {classuid}"  # noqa: E501 vendored from microsoft/xavier, not refactored
                 )
                 if isremotedclass:
                     args[
@@ -1296,9 +1293,9 @@ class Remoter:
                 loc = self.fixedrmtloc
             if key in fixedlocs:
                 loc = fixedlocs[key]
-            if len(args) > 0:
-                if type(args[0]) in remotedclasskey:
-                    if key in ["remoter.rmtclass//objgetattr", "remoter.rmtclass//objsetattr"]:
+            if len(args) > 0:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
+                if type(args[0]) in remotedclasskey:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
+                    if key in ["remoter.rmtclass//objgetattr", "remoter.rmtclass//objsetattr"]:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                         if remotedclasskey[type(args[0])] in fixedlocs:
                             loc = fixedlocs[remotedclasskey[type(args[0])]]
         loc = modifyloc(loc, key, actclasskey)
@@ -1315,9 +1312,12 @@ class Remoter:
         with self.connlock:
             if loc not in self.conns:
                 # create a new connection to the server
-                protocol, addr = loc.split("://")
+                protocol, addr = loc.split("://")  # noqa: RUF059 vendored from microsoft/xavier, not refactored
                 handlefn = partial(self.msgHandler, False, False, loc)
-                closefn = lambda msgr, sockkey: self.closeclientconn(loc, msgr, sockkey)
+
+                def closefn(msgr, sockkey):
+                    return self.closeclientconn(loc, msgr, sockkey)
+
                 if protocol == "unix":
                     conn = msgunix.MessengerUnix(self.sockpath, None, loc, None, handlefn, closefn)
                 elif protocol == "udp":
@@ -1354,7 +1354,7 @@ class Remoter:
 
         loc = taskinfo["loc"]
         logger.debug(
-            f"Sending cancellation message to connection {loc} for function with ID {uid} -- running task: {runningtask}"
+            f"Sending cancellation message to connection {loc} for function with ID {uid} -- running task: {runningtask}"  # noqa: E501 vendored from microsoft/xavier, not refactored
         )
         if loc == "direct" and runningtask is not None:
             # stop the function locally
@@ -1390,8 +1390,8 @@ class Remoter:
                         conn.senddata(msg)
 
     def initrmtclassonclient(self, *args):
-        if len(args) > 0:
-            if type(args[0]) in remotedclasses:
+        if len(args) > 0:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
+            if type(args[0]) in remotedclasses:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                 if not localhasattr(args[0], "uuid_rmt0bf") or args[0].uuid_rmt0bf is None:  # not init yet
                     initfields(args[0])
                     logger.debug(f"Initializing remote class on client with id {args[0].uuid_rmt0bf}")
@@ -1403,7 +1403,7 @@ class Remoter:
             return True
         if self.fnserverudp and self.fnserverudp.isself(loc):
             return True
-        if hasattr(self, "sockserver") and self.sockserver.isself(loc):
+        if hasattr(self, "sockserver") and self.sockserver.isself(loc):  # noqa: SIM103 vendored from microsoft/xavier, not refactored
             return True
         return False
 
@@ -1418,7 +1418,7 @@ class Remoter:
             actclasskey = f"{args[0].__class__.__module__}/{args[0].__class__.__name__}"
             cls = type(args[0])
             if not cls.remoteable_rmt0bf:
-                assert False, "Single instance non-remoteable classes cannot run remoted functions"
+                assert False, "Single instance non-remoteable classes cannot run remoted functions"  # noqa: B011 vendored from microsoft/xavier, not refactored
         else:
             actclasskey = None
         loc, classuid = self.getrunloc(taskname, actclasskey, key, *args)
@@ -1428,7 +1428,7 @@ class Remoter:
         uid = uuid.uuid4()
         taskinfo = {"loc": loc, "func_name": func_name, "args": args}
         logger.info(
-            f"===Running remoted function {key} with ID {uid} -- classuid {classuid} -- location: {loc} -- async: {isasync}===="
+            f"===Running remoted function {key} with ID {uid} -- classuid {classuid} -- location: {loc} -- async: {isasync}===="  # noqa: E501 vendored from microsoft/xavier, not refactored
         )
         if key in ["remoter.rmtclass//objgetattr", "remoter.rmtclass//objsetattr"]:
             logger.info(f"Getting attribute {args[1]} of remoted class {args[0].uuid_rmt0bf} of tpe {type(args[0])}")
@@ -1476,7 +1476,7 @@ class Remoter:
                     logger.debug(f"Reuse connection for class {classuid} with ID {uid}")
                     conn = self.remotedClassesConn[classuid]
                 else:
-                    if isremotedclass:
+                    if isremotedclass:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
                         obj = args[0]
                     else:
                         obj = None
@@ -1499,12 +1499,12 @@ class Remoter:
             if uid in self.results:
                 result, ex = self.results[uid]  # result, exception tuple
                 logger.debug(
-                    f"Getting result for function {taskname} - {taskinfo['func_name']} - with uid {uid} of type {type(result)}"
+                    f"Getting result for function {taskname} - {taskinfo['func_name']} - with uid {uid} of type {type(result)}"  # noqa: E501 vendored from microsoft/xavier, not refactored
                 )
                 del self.results[uid]
                 del self.events[uid]
-                if taskinfo is not None:
-                    if len(taskinfo["args"]) > 0 and taskinfo["func_name"] == "__init__":
+                if taskinfo is not None:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
+                    if len(taskinfo["args"]) > 0 and taskinfo["func_name"] == "__init__":  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                         if type(taskinfo["args"][0]) in remotedclasses:
                             if result != taskinfo["args"][0].uuid_rmt0bf:
                                 logger.info(
@@ -1541,7 +1541,7 @@ class Remoter:
                     self.mpresults[uid] = (None, e)
                 event.set()
             else:
-                assert False, f"Unknown multiprocHandler message type: {ret['type']}"
+                assert False, f"Unknown multiprocHandler message type: {ret['type']}"  # noqa: B011 vendored from microsoft/xavier, not refactored
 
     async def runAsyncFunction(self, taskname, functype, nowait, timeout, loc, func, *args, **kwargs):
         global is_process
@@ -1557,7 +1557,7 @@ class Remoter:
                 await asyncio.wait_for(event.wait(), timeout)
             except TimeoutError:
                 self.cancelRemotedFunction(uid)
-                raise Exception(f"Function {taskname} with uid {uid} timed out after {timeout} seconds")
+                raise Exception(f"Function {taskname} with uid {uid} timed out after {timeout} seconds")  # noqa: B904 vendored from microsoft/xavier, not refactored
         else:
             await event.wait()
         logger.debug(f"Event with hash {hash(event)} set")
@@ -1695,7 +1695,7 @@ class Remoter:
     # 2. Threadpooltask for longer blocking calls that can be parallelized
     # 3. Process for heavy CPU bound tasks that need isolation - and may have internal threading
     # Dangers of Thread or ProcessPoolTask
-    # - these are non-cancellable once started - thread cannot be reliably cancelled, process pool task cannot be cancelled once started
+    # - these are non-cancellable once started - thread cannot be reliably cancelled, process pool task cannot be cancelled once started  # noqa: E501 vendored from microsoft/xavier, not refactored
     # - only use thread for windows since function pickling is an issue
     def callfunction(
         self,
@@ -2064,13 +2064,13 @@ def ismetaremotedclass(args) -> bool:
 
 def checkForRemotedClass(taskname, func, *args):
     isremoted = ismetaremotedclass(args)
-    if isremoted and args[0].rmtowner_rmt0bf:
+    if isremoted and args[0].rmtowner_rmt0bf:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
         # print(f"Rmt: {args[0]}")
         # print(f"Taskname: {taskname}, Class key: {remotedclasskey[type(args[0])]}")
         if taskname == remotedclasskey[type(args[0])]:
-            # for remoted classes, if the taskname matches the class key and it is on server side, run __origfunc__ directly
+            # for remoted classes, if the taskname matches the class key and it is on server side, run __origfunc__ directly  # noqa: E501 vendored from microsoft/xavier, not refactored
             logger.debug(
-                f"Taskname {taskname} matches remoted class key {remotedclasskey[type(args[0])]} and is on server side, running {func.__name__} directly"
+                f"Taskname {taskname} matches remoted class key {remotedclasskey[type(args[0])]} and is on server side, running {func.__name__} directly"  # noqa: E501 vendored from microsoft/xavier, not refactored
             )
             return True
     return False

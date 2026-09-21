@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import atexit
-import subprocess
-import os
-import sys
-from termcolor import cprint
-from datetime import datetime, timezone
 import logging
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime
+
+from termcolor import cprint
 
 # log levels:
 # fatal/critical 50, error 40, warn/warning 30, info 20, debug 10, notset 0
@@ -82,7 +83,7 @@ class SimpleLog:
         if "XAVIER_LOGLEVEL" in os.environ:
             envlevel = os.environ["XAVIER_LOGLEVEL"].lower()  # always a string
         if envlevel is not None:
-            if envlevel in levels:
+            if envlevel in levels:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
                 loglevel = levels[envlevel]
             else:
                 loglevel = int(envlevel)  # if envlevel is supposed to be int, then let it crash if it is not
@@ -92,7 +93,7 @@ class SimpleLog:
         if "XAVIER_PRINTLOGLEVEL" in os.environ:
             envlevel = os.environ["XAVIER_PRINTLOGLEVEL"].lower()  # always a string
         if envlevel is not None:
-            if envlevel in levels:
+            if envlevel in levels:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
                 printlevel = levels[envlevel]
             else:
                 printlevel = int(envlevel)  # if envlevel is supposed to be int, then let it crash if it is not
@@ -106,7 +107,7 @@ class SimpleLog:
                 logdir = os.environ["LOGDIR"]
             else:
                 # get home directory
-                if "HOME" in os.environ:
+                if "HOME" in os.environ:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
                     homedir = os.environ["HOME"]
                 else:
                     homedir = os.path.expanduser("~")
@@ -116,7 +117,7 @@ class SimpleLog:
             filename = os.path.join(logdir, filename)
         self.filename = rollover(filename)
         print(f"Log file: {self.filename} - loglevel: {loglevel}, printlevel: {printlevel}")
-        self.file = open(self.filename, "wt", encoding="utf-8") if self.filename else None
+        self.file = open(self.filename, "w", encoding="utf-8") if self.filename else None  # noqa: SIM115 vendored from microsoft/xavier, not refactored
         self.loglevel = loglevel
         self.printlevel = printlevel
         self.prepend = not noprepend
@@ -127,7 +128,7 @@ class SimpleLog:
         if not self.prepend:
             return ""
         if self.useutc:
-            now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
         else:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # use local timezone
         if level is None:
@@ -163,7 +164,7 @@ class SimpleLog:
                 cprint(*args, **kwargs, color=color, flush=True, **kwargs)
 
     def levelprint(self, level: str, *args, **kwargs):
-        if "color" in kwargs:
+        if "color" in kwargs:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
             color = kwargs.pop("color")
         else:
             color = None

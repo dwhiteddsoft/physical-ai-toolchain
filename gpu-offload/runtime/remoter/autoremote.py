@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-# use by sitecustomize.py
-import yaml
 import importlib
 import inspect
-import os
-import sys
-import re
-from . import remoter, rmtclass, rmtconfigkube
 import logging
+import os
+import re
+import sys
+
+# use by sitecustomize.py
+import yaml
+
+from . import remoter, rmtclass, rmtconfigkube
 from .simplelog import initlog
 
 
@@ -34,7 +36,7 @@ def replaceenvvars(o):
 
 def load_config(configpath) -> dict:
     try:
-        with open(configpath, "r", encoding="utf-8") as f:
+        with open(configpath, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
             if cfg is None:
                 return {}
@@ -110,7 +112,7 @@ def apply_decorators_from_config(configpath) -> bool:
     # and we want to make sure to use the remotetask version of the method when decorating the class
     for func in cfg.get("remotefuncs", []):
         for target_path, params in func.items():
-            if isserver:
+            if isserver:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                 if cfg.get("stubs", {}).get(target_path, None) is not None:
                     logger.info(
                         f"Using actual function path for stub {target_path} using {cfg['stubs'][target_path]}",
@@ -142,7 +144,7 @@ def apply_decorators_from_config(configpath) -> bool:
                 else:
                     setattr(mod, attr_name, new_target)
                 logger.info(
-                    f"Decorated function {target_path} with remotetask (taskkey={taskkey}, functype={functype}, module={mod})",
+                    f"Decorated function {target_path} with remotetask (taskkey={taskkey}, functype={functype}, module={mod})",  # noqa: E501 vendored from microsoft/xavier, not refactored
                     color="cyan",
                 )
                 rmtclass.setfixedloc(target_path, funcparams)
@@ -153,7 +155,7 @@ def apply_decorators_from_config(configpath) -> bool:
 
     for cls in cfg.get("remoteclasses", []):
         for target_path, params in cls.items():
-            if isserver:
+            if isserver:  # noqa: SIM102 vendored from microsoft/xavier, not refactored
                 if cfg.get("stubs", {}).get(target_path, None) is not None:
                     logger.info(
                         f"Using actual class path for stub {target_path} using {cfg['stubs'][target_path]}",
@@ -204,7 +206,7 @@ def start(serveronly=True):
         tempdir = tempfile.mkdtemp()
         newremoteconfig = os.path.join(tempdir, os.path.basename(remoteconfig))
         logger.info(
-            f"Remote config {remoteconfig} is not in a writeable location. Copying to temporary directory {newremoteconfig}"
+            f"Remote config {remoteconfig} is not in a writeable location. Copying to temporary directory {newremoteconfig}"  # noqa: E501 vendored from microsoft/xavier, not refactored
         )
         import shutil
 
@@ -216,7 +218,7 @@ def start(serveronly=True):
     locconfigfile = cfg.get("configfile", os.environ.get("CONFIGFILE", None))
     if locconfigfile is not None and not os.path.exists(locconfigfile):
         # check for configfile in same dir as remoteconfigpath
-        dir, fname = os.path.split(remoteconfig)
+        dir, fname = os.path.split(remoteconfig)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
         locconfigfile = os.path.abspath(os.path.join(dir, locconfigfile))
     logger.info(f"Location Config file: {locconfigfile} -- Remote Task config file: {remoteconfig}")
     if cfg.get("configfromkube", False) or os.environ.get("CONFIGFROMKUBE", "false").lower() == "true":
@@ -244,7 +246,7 @@ def start(serveronly=True):
             cfg.get("remoteport", int(os.environ.get("REMOTEPORT", 0))),
             False,
             locconfigfile,
-            # kubeconfig already handled - needs to be done prior to remoteable so that decorators can be applied correctly
+            # kubeconfig already handled - needs to be done prior to remoteable so that decorators can be applied correctly  # noqa: E501 vendored from microsoft/xavier, not refactored
             None,
             serveronly,
         )

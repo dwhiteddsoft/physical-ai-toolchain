@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import logging
+import os
+import traceback
+import types
 
 from . import remoter
-import os
-import types
-import traceback
-from .simplelog import initlog
-import logging
 from .msgsock import isselfip
+from .simplelog import initlog
 
 logger = initlog("rmtclass.log", logging.DEBUG, logging.INFO)
 
@@ -19,9 +19,8 @@ def _getfromremote(x):
 
 
 def syncwithremote(x):
-    uuid = x.uuid_rmt0bf
     rmtloc = x.rmtloc_rmt0bf
-    assert x.rmtowner_rmt0bf == False, "syncwithremote should be called on client stub instance"
+    assert not x.rmtowner_rmt0bf, "syncwithremote should be called on client stub instance"
     if x.failed_rmt0bf:
         raise RuntimeError("Remote class instance has failed")
     ret = x._getfromremote()
@@ -51,7 +50,7 @@ def getmetadata(self, name):
             return remoter.remotedclassmetadata[id(self)][name]
         except KeyError:
             print(f"getmatadata {name} does not exist")
-            raise AttributeError(name)
+            raise AttributeError(name)  # noqa: B904 vendored from microsoft/xavier, not refactored
     else:
         return object.__getattribute__(self, name)
 
@@ -120,7 +119,7 @@ def getattribute(self, name):
             # no rmtloc set
             logger.error(f"getattribute returns exception {e}\n{traceback.format_exc()}", color="red")
             # return object.__getattribute__(self, name)
-            raise AttributeError(f"{name} not found -- perhaps rmtloc not set yet")
+            raise AttributeError(f"{name} not found -- perhaps rmtloc not set yet")  # noqa: B904 vendored from microsoft/xavier, not refactored
         actclasskey = f"{self.__class__.__module__}/{self.__class__.__name__}"
         timeout = remoter.getparam("getattrtimeout", taskname + "/", actclasskey, None)
         timeout = remoter.getparam(
@@ -144,7 +143,7 @@ def setattribute(self, name, val):
             # no rmtloc set
             logger.error(f"getattribute returns exception {e}\n{traceback.format_exc()}", color="red")
             # return object.__setattr__(self, name, val)
-            raise AttributeError(f"{name} not found -- perhaps rmtloc not set yet")
+            raise AttributeError(f"{name} not found -- perhaps rmtloc not set yet")  # noqa: B904 vendored from microsoft/xavier, not refactored
         actclasskey = f"{self.__class__.__module__}/{self.__class__.__name__}"
         timeout = remoter.getparam("setattrtimeout", taskname + "/", actclasskey, None)
         timeout = remoter.getparam(
@@ -171,7 +170,7 @@ def isremoteable(isserver: bool, key: str, actclasskey: str) -> bool:
     if remoter.getparam("remoteableserver", key, actclasskey, False):
         return True
     remoteableon = remoter.getdictparam("remoteableon", key, actclasskey)
-    for loc, val in remoteableon.items():
+    for loc, val in remoteableon.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
         if ":" in loc:
             host, port = loc.split(":")
             if isselfip(host, port, remoter.remoterparams["port"]):
@@ -197,7 +196,7 @@ def allowallfunctions(cls, isserver):
             # baseclass if method is inherited from base class, and module is the module where the function is defined
             # if function is defined in this class, then qualname uses this class, and module
             # in this case actclasskey is mod.thisclass, and funcname is func, so key is mod.thisclass.func
-            key, module_name, func_name, class_name = remoter.getfuncname(attr_value)
+            key, module_name, func_name, class_name = remoter.getfuncname(attr_value)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
             # assert func_name == attr_name, "Function name mismatch" -- this fails sometimes
             if func_name != attr_name:
                 logger.warning(f"Function name mismatch: {func_name} != {attr_name}", color="yellow")
@@ -214,8 +213,8 @@ def allowallfunctions(cls, isserver):
             timeout = remoter.getparam("timeout", key, actclasskey, None)
             if not remoteable and singleinstance and attr_name == "__init__":
                 assert not hasattr(attr_value, "__isremoted__"), "Function __init__ already decorated"
-                setattr(cls, "__new__", remoter.singleton_new)
-                setattr(cls, "__orig_init__", attr_value)
+                cls.__new__ = remoter.singleton_new
+                cls.__orig_init__ = attr_value
                 setattr(cls, attr_name, remoter.singleton_init)
                 remoter.allowed_functions.add("remoter.remoter//singleton_init")
                 # remoter.allowed_functions.add(f"remoter.remoter//singleton_new")
@@ -239,23 +238,21 @@ def allowallfunctions(cls, isserver):
     if remotelocclass is not None:
         remoter.setfixedlocs({actclasskey: remotelocclass})
     logger.info(
-        f"Class {actclasskey} remoteable={remoteableclass} remoteloc={remotelocclass} singleinstance={singleinstanceclass}",
+        f"Class {actclasskey} remoteable={remoteableclass} remoteloc={remotelocclass} singleinstance={singleinstanceclass}",  # noqa: E501 vendored from microsoft/xavier, not refactored
         color="green",
     )
     taskname = remoter.getparam("taskname", actclasskey + "/", actclasskey, actclasskey)
     timeout = remoter.getparam("getfromremotetimeout", actclasskey + "/", actclasskey, None)
     remoter.remotedclasskey[cls] = taskname
     # always override these functions
-    setattr(cls, "syncwithremote", syncwithremote)
-    setattr(
-        cls, "_getfromremote", remoter.createRemotedTask(_getfromremote, actclasskey, "threadpooltask", timeout=timeout)
-    )
+    cls.syncwithremote = syncwithremote
+    cls._getfromremote = remoter.createRemotedTask(_getfromremote, actclasskey, "threadpooltask", timeout=timeout)
     # class attributes
-    setattr(cls, "remoteable_rmt0bf", remoteableclass)
-    setattr(cls, "singleinstance_rmt0bf", singleinstanceclass)
+    cls.remoteable_rmt0bf = remoteableclass
+    cls.singleinstance_rmt0bf = singleinstanceclass
     if remoteableclass:
-        setattr(cls, "__getattribute__", getattribute)
-        setattr(cls, "__setattr__", setattribute)
+        cls.__getattribute__ = getattribute
+        cls.__setattr__ = setattribute
     remoter.allowed_functions.add("remoter.rmtclass//_getfromremote")
     remoter.allowed_functions.add("remoter.rmtclass//objgetattr")
     remoter.allowed_functions.add("remoter.rmtclass//objsetattr")
@@ -289,7 +286,7 @@ def createRemotedClass(cls, taskname, params):
     return cls
 
 
-def remotedclass(taskname=None, params={}):
+def remotedclass(taskname=None, params={}):  # noqa: B006 vendored from microsoft/xavier, not refactored
     def decorator(cls):
         return createRemotedClass(cls, taskname, params)
 

@@ -28,10 +28,4 @@ test = [
 packages = ["remoter"]
 
 [tool.ruff]
-line-length = 120
-target-version = "py312"
-
-[tool.ruff.lint.per-file-ignores]
-# remoter is vendored from microsoft/xavier; remaining findings are upstream style
-# choices (unused locals, lambda assignment, == False) left unrefactored.
-"remoter/*.py" = ["E712", "E731", "F841"]
+extend = "../../pyproject.toml"

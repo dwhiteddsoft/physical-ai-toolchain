@@ -156,7 +156,7 @@ def _tensor_from_dict(target: type[Any], payload: Any, device: Any | None, limit
     if not isinstance(source_device, str):
         raise TypeError("Tensor payload device must be a string")
 
-    if data:
+    if data:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
         tensor = torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
     else:
         tensor = torch.empty(shape, dtype=dtype)

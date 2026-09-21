@@ -4,7 +4,7 @@ slug: /documentation
 title: Documentation
 description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team
-ms.date: 2026-08-12
+ms.date: 2026-09-19
 ms.topic: overview
 keywords:
   - documentation
@@ -13,7 +13,7 @@ keywords:
   - azure
 ---
 
-Technical documentation for deploying, training, and operating robotics workloads on Azure with NVIDIA Isaac and OSMO. This index organizes every guide, reference, and walkthrough in the repository by topic so you can find what you need based on where you are in the workflow.
+Technical documentation for deploying, training, and operating robotics workloads on Azure with NVIDIA Isaac and OSMO. This index links topic hubs and selected guides for each part of the workflow.
 
 Documentation spans the full lifecycle, from provisioning Azure infrastructure with Terraform, through training reinforcement-learning policies with Isaac Lab and AzureML, to running inference on edge devices. Each section targets a specific audience and phase of the project.
 
@@ -51,6 +51,8 @@ Adoption is modeled as six graduated tiers (T0-T5), each a legitimate stopping p
 | [Getting Started](getting-started/README.md) | Environment setup, prerequisites, and first deployment walkthrough                  | Available   |
 | [Deployment Guide](infrastructure/README.md) | Infrastructure provisioning with Terraform, AKS cluster setup, and networking       | Available   |
 | [Training](training/README.md)               | Model training pipelines with Isaac Lab, AzureML jobs, and OSMO orchestration       | Available   |
+| [Data Pipeline](data-pipeline/README.md)     | Recording configuration, native ROS 2 recording, and edge-to-cloud sync             | Available   |
+| [Synthetic Data](synthetic-data/README.md)   | Planned Cosmos pipeline architecture and placeholder workflows                      | Planned     |
 | Inference                                    | Serving trained policies for real-time control on edge and cloud                    | Coming soon |
 | Workflows                                    | AzureML and OSMO job templates, pipeline configuration, and submission scripts      | Coming soon |
 | [Operations](operations/README.md)           | Monitoring, scaling, troubleshooting, and cost management for running clusters      | Available   |

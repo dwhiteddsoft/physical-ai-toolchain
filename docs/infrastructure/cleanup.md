@@ -3,7 +3,7 @@ sidebar_position: 10
 title: Cleanup and Destroy
 description: Remove cluster components, destroy Azure infrastructure, and clean up development environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-15
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - cleanup
@@ -112,7 +112,7 @@ Fastest cleanup method. Removes all resources regardless of how they were create
 
 ```bash
 # Get resource group name from Terraform outputs
-terraform output -raw resource_group | jq -r '.name'
+terraform output -json resource_group | jq -r '.name'
 
 # Delete resource group
 az group delete --name <resource-group-name> --yes --no-wait

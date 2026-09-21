@@ -9,6 +9,8 @@ Transparent GPU offloading for robot inference: run a lightweight control contai
 next to the robot while heavy inference executes in a GPU server-stage pod. Offloading
 is opt-in through workload label and annotation.
 
+**NOTE:** The operating environment for this is a GPU server that sits in an isolated network and therefore does not adhere to some of the more enterprise, wire standard security conventions. It would typically sit in [Level 1](https://plcprogramming.io/blog/purdue-model-explained) of a Purdue Network.
+
 ## 📋 Prerequisites
 
 | Requirement                | Minimum                                               |

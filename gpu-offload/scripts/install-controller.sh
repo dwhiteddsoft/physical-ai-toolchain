@@ -21,3 +21,15 @@ helm --kube-context "$GPU_OFFLOAD_KUBE_CONTEXT" upgrade --install gpu-offload he
 kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status deployment/gpu-offload-mutate \
   --namespace gpu-offload \
   --timeout=180s
+
+# rollout status only confirms the pod is Ready; it says nothing about whether
+# the Service's Endpoints have been populated yet. The API server calls the
+# webhook through that Service, and admission (failurePolicy: Fail, so a miss
+# blocks every offload-labeled pod/deployment/job) can hit a connection-refused
+# race in the gap between rollout success and Endpoints propagation. Wait for
+# an actual endpoint before returning.
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" wait \
+  --for=jsonpath='{.subsets[0].addresses[0].ip}' \
+  endpoints/gpu-offload-mutate \
+  --namespace gpu-offload \
+  --timeout=60s

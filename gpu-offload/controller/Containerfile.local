@@ -5,7 +5,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN --mount=type=secret,id=PIP_INDEX_URL,env=PIP_INDEX_URL \
+RUN --mount=type=secret,id=PIP_INDEX_URL \
+	export PIP_INDEX_URL="$(cat /run/secrets/PIP_INDEX_URL 2>/dev/null || true)"; \
 	pip install --no-cache-dir kubernetes==35.0.0 PyYAML==6.0.2
 
 COPY . /app

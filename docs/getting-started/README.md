@@ -86,7 +86,9 @@ The local default path (T0 — Dev) has **no cloud cost**. It runs entirely on y
 
 ## 📋 Prerequisites Summary
 
-T0 does not require Azure resources or Kubernetes services by default. Local components require Python ≥3.12, `uv`, ROS 2, and their own runtime dependencies; the dataviewer frontend also needs Node.js. Install `kind`, `kubectl`, and Helm only when selecting an optional local Kubernetes profile such as GPU offload; the repository-wide `setup-dev.sh` additionally checks cloud and Kubernetes CLI tools even for a local-only workflow. The additional cloud tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
+T0 does not require Azure resources or Kubernetes services by default. Local components require Python ≥3.12, `uv`, ROS 2, and their own runtime dependencies; the dataviewer frontend also needs Node.js.
+
+Install `kind`, `kubectl`, and Helm only when selecting an optional local Kubernetes profile such as GPU offload; the repository-wide `setup-dev.sh` additionally checks cloud and Kubernetes CLI tools even for a local-only workflow. The additional cloud tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
 
 | Tool      | Version           | Required for                                         |
 |-----------|-------------------|------------------------------------------------------|
